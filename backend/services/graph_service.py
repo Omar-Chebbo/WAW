@@ -32,6 +32,10 @@ def load_graph(csv_path: Path) -> nx.Graph:
     # Keep only numeric weights; fill any NaN with 1
     df["weight"] = pd.to_numeric(df["weight"], errors="coerce").fillna(1.0)
 
+        # For research experiments we only want the structural edge list.
+    # Drop any previously computed score columns that may exist in raw files.
+    df = df[["source", "target", "weight"]].copy()
+
     G = nx.from_pandas_edgelist(df, edge_attr=True)
     return G
 

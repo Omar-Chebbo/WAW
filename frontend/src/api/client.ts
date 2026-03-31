@@ -6,7 +6,8 @@ import axios from 'axios'
 import { useQuery } from '@tanstack/react-query'
 import type {
   Dataset, GraphData, GraphStats, AnomalySummary,
-  DistributionBin, BackboneSummary, EvaluationReport, MetricMeta
+  DistributionBin, BackboneSummary, EvaluationReport, MetricMeta,
+  ResearchAnalysisResponse, ResearchNetworkId, MethodId
 } from '../types'
 
 // Base URL — in dev, Vite proxies /api to localhost:8000
@@ -112,3 +113,15 @@ export const fetchDistributions = (
       },
     })
     .then((r) => r.data)
+
+// ── Research analysis ─────────────────────────────────────────────
+export const runResearchAnalysis = (
+  networkId: ResearchNetworkId,
+  methodId: MethodId
+) =>
+  api.post<ResearchAnalysisResponse>('/research/run', {
+    network_id: networkId,
+    method_id: methodId,
+  }).then(r => r.data)
+
+  

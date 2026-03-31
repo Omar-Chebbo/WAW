@@ -3,7 +3,6 @@ backend/services/anomaly_service.py
 Handles running anomaly labeling and saving labeled CSVs.
 """
 import pandas as pd
-from pathlib import Path
 
 from backend.core.anomaly import (
     label_anomalies,
@@ -17,19 +16,15 @@ from backend.services.score_service import load_scores
 
 def run_anomaly_labeling(session_id: str, method_id: str) -> dict:
     """
-    Run automatic (IsolationForest) anomaly labeling for one method.
-    Saves labeled CSV and returns a summary.
+    Run automatic anomaly labeling for one method.
+    The preprocessing step is now selected dynamically inside label_anomalies().
     """
-    config     = METHOD_REGISTRY[method_id]
-    score_col  = config["score_column"]
+    config = METHOD_REGISTRY[method_id]
+    score_col = config["score_column"]
 
-    # Load the previously computed scores
     data = load_scores(session_id, method_id)
-
-    # Label using IsolationForest
     data = label_anomalies(data, score_col)
 
-    # Save to labeled folder
     labeled_dir = SESSIONS_DIR / session_id / "labeled"
     labeled_dir.mkdir(parents=True, exist_ok=True)
     out_path = labeled_dir / f"{method_id}.csv"
@@ -40,24 +35,20 @@ def run_anomaly_labeling(session_id: str, method_id: str) -> dict:
 
 def run_manual_labeling(session_id: str, method_id: str, percentile: float) -> dict:
     """
-    Re-label using a manual percentile threshold (drives the slider in Step 4).
-    Updates the existing labeled CSV in place.
+    Re-label using a manual percentile threshold.
     """
-    config    = METHOD_REGISTRY[method_id]
+    config = METHOD_REGISTRY[method_id]
     score_col = config["score_column"]
 
     labeled_path = SESSIONS_DIR / session_id / "labeled" / f"{method_id}.csv"
 
-    # Start from labeled data if it exists, else from scores
     if labeled_path.exists():
         data = pd.read_csv(labeled_path)
     else:
         data = load_scores(session_id, method_id)
 
-    # Ensure normalised column exists
     if f"{score_col}_normalized" not in data.columns:
-        from backend.core.anomaly import label_anomalies as _la
-        data = _la(data, score_col)
+        data = label_anomalies(data, score_col)
 
     data = label_anomalies_with_percentile(data, score_col, percentile)
     data.to_csv(labeled_path, index=False)
@@ -66,7 +57,6 @@ def run_manual_labeling(session_id: str, method_id: str, percentile: float) -> d
 
 
 def load_labeled(session_id: str, method_id: str) -> pd.DataFrame:
-    """Load labeled edge data for one method."""
     path = SESSIONS_DIR / session_id / "labeled" / f"{method_id}.csv"
     if not path.exists():
         raise FileNotFoundError(f"Labeled data not found for method '{method_id}'")
@@ -75,13 +65,12 @@ def load_labeled(session_id: str, method_id: str) -> pd.DataFrame:
 
 def get_score_distribution(session_id: str, method_id: str) -> list:
     """
-    Return a histogram-friendly list of { bin, count, is_backbone } dicts
-    for rendering the score distribution chart in Step 4.
+    Return a histogram-friendly list of {bin, total, backbone, normal}.
     """
-    config    = METHOD_REGISTRY[method_id]
+    config = METHOD_REGISTRY[method_id]
     score_col = config["score_column"]
-    norm_col  = f"{score_col}_normalized"
-    anom_col  = f"{score_col}_anomaly"
+    norm_col = f"{score_col}_normalized"
+    anom_col = f"{score_col}_anomaly"
 
     labeled_path = SESSIONS_DIR / session_id / "labeled" / f"{method_id}.csv"
     if not labeled_path.exists():
@@ -92,20 +81,26 @@ def get_score_distribution(session_id: str, method_id: str) -> list:
         return []
 
     import numpy as np
-    bins    = np.linspace(0, 1, 21)    # 20 equal bins
-    labels_ = bins[:-1]
-    result  = []
+
+    bins = np.linspace(0, 1, 21)
+    result = []
 
     for i in range(len(bins) - 1):
-        lo, hi   = bins[i], bins[i + 1]
-        mask     = (data[norm_col] >= lo) & (data[norm_col] < hi)
-        total    = int(mask.sum())
+        lo, hi = bins[i], bins[i + 1]
+
+        if i == len(bins) - 2:
+            mask = (data[norm_col] >= lo) & (data[norm_col] <= hi)
+        else:
+            mask = (data[norm_col] >= lo) & (data[norm_col] < hi)
+
+        total = int(mask.sum())
         backbone = int(((data[anom_col] == -1) & mask).sum()) if anom_col in data.columns else 0
+
         result.append({
-            "bin":      round(float(labels_[i]), 2),
-            "total":    total,
+            "bin": round(float(lo), 2),
+            "total": total,
             "backbone": backbone,
-            "normal":   total - backbone,
+            "normal": total - backbone,
         })
 
     return result

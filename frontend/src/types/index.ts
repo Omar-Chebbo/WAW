@@ -57,6 +57,7 @@ export interface AnomalySummary {
   score_min: number
   score_max: number
   score_mean: number
+  selected_transform?: string | null
 }
 
 export interface DistributionBin {
@@ -134,3 +135,90 @@ export interface MethodDistributions {
 }
 
 export type DistributionReport = Record<string, MethodDistributions>
+
+// ── Research analysis types ───────────────────────────────────────
+export type ResearchNetworkId = 'karate' | 'lesmis'
+export type ResearchTransformId =
+  | 'raw'
+  | 'log'
+  | 'minmax'
+  | 'zscore'
+  | 'log_minmax'
+  | 'log_zscore'
+
+export interface ResearchHistogramBin {
+  bin_left: number
+  bin_right: number
+  bin_center: number
+  count: number
+}
+
+export interface ResearchDistributionStats {
+  mean: number
+  median: number
+  variance: number
+  std: number
+  min: number
+  max: number
+  skewness: number
+  kurtosis: number
+  zero_ratio: number
+  unique_ratio: number
+  histogram: ResearchHistogramBin[]
+}
+
+export interface ResearchDecisionSummary {
+  feasible: boolean
+  selected_transform: string
+  reason: string
+  shape_class: string
+  decision_features: {
+    skewness: number
+    zero_ratio: number
+    unique_ratio: number
+  }
+}
+
+export interface ResearchBackboneSummary {
+  n_total: number
+  n_backbone: number
+  pct_backbone: number
+  node_count: number
+  component_count: number
+  edge_retention: number
+  backbone_score_mean: number
+  normal_score_mean: number
+  jaccard_vs_raw?: number
+  sample_edge_count_listed?: number
+}
+
+export interface ResearchTransformExperiment {
+  transform_id: string
+  label: string
+  description: string
+  transformed_stats?: ResearchDistributionStats
+  backbone?: ResearchBackboneSummary
+  selected_edges?: string[][]
+  error?: string
+}
+
+export interface ResearchAnalysisResponse {
+  network: string
+  method: string
+  score_column: string
+  n_nodes: number
+  n_edges: number
+  distribution: ResearchDistributionStats & {
+    shape_class: string
+    recommended_transform: string
+    auto_decision_reason: string
+  }
+  preprocessing_recommendation: ResearchDecisionSummary
+  transformation_metadata: Record<string, { label: string; description: string }>
+  transformation_experiments: Record<string, ResearchTransformExperiment>
+  algorithmic_notes: {
+    computational_cost: string
+    runtime_classification_limitations: string
+    design_tradeoff: string
+  }
+}

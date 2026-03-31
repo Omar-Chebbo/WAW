@@ -15,6 +15,13 @@ import { METHODS } from '../constants/methods'
 import { StepCard, Button } from '../components/ui'
 import type { AnomalySummary, DistributionBin } from '../types'
 
+function formatTransformName(id?: string | null) {
+  if (!id) return 'Auto'
+  return id
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase())
+}
+
 export default function Step4() {
   const {
     sessionId, selectedMethods, scoresReady,
@@ -140,7 +147,7 @@ export default function Step4() {
 
             {/* Stats row */}
             {summary && !isLoading && (
-              <div className="grid grid-cols-3 gap-4 mb-6">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                 <div className="bg-gray-50 rounded-xl p-4 text-center">
                   <div className="text-2xl font-bold" style={{ color: m.color }}>
                     {summary.flagged.toLocaleString()}
@@ -154,6 +161,12 @@ export default function Step4() {
                 <div className="bg-gray-50 rounded-xl p-4 text-center">
                   <div className="text-2xl font-bold text-gray-700">{summary.total.toLocaleString()}</div>
                   <div className="text-xs text-gray-500 mt-1">Total edges</div>
+                </div>
+                <div className="bg-gray-50 rounded-xl p-4 text-center">
+                  <div className="text-lg font-bold text-gray-700">
+                    {formatTransformName(summary.selected_transform)}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">Auto preprocessing</div>
                 </div>
               </div>
             )}

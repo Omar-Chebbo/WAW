@@ -16,6 +16,7 @@ import {
 } from '../api/client'
 import { METHODS } from '../constants/methods'
 import { StepCard, Button } from '../components/ui'
+import ResearchAnalysisPanel from '../components/research/ResearchAnalysisPanel'
 import type { EvaluationReport, DistributionReport } from '../types'
 
 // Deviation → badge colour
@@ -639,6 +640,9 @@ const [error,     setError]     = useState<string | null>(null)
               sessionId={sessionId}
             />
           )}
+      <div className="mt-10 pt-8 border-t border-gray-100">
+        <ResearchAnalysisPanel />
+      </div>
 
       <div className="flex justify-between pt-6">
         <Button variant="secondary" onClick={() => goToStep(6)}>← Back</Button>
