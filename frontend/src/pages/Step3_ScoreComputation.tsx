@@ -9,9 +9,14 @@ import { METHODS } from '../constants/methods'
 import { StepCard, Button } from '../components/ui'
 
 export default function Step3() {
-  const {
-    sessionId, datasetId, isCustomDataset, selectedMethods,
-    scoresReady, setScoresReady, goToStep
+    const {
+    sessionId,
+    datasetId,
+    isCustomDataset,
+    selectedMethods,
+    scoresReady,
+    setScoresReady,
+    goToStep,
   } = useWorkflowStore()
 
   const [computing, setComputing] = useState(false)
@@ -147,9 +152,14 @@ export default function Step3() {
         </div>
       )}
 
-      <div className="flex justify-between pt-2">
-        <Button variant="secondary" onClick={() => goToStep(2)}>← Back</Button>
-        <Button onClick={() => goToStep(4)} disabled={!done}>Next →</Button>
+        <div className="flex justify-between pt-2">
+        <Button variant="secondary" onClick={() => goToStep(2)}>
+          ← Back
+        </Button>
+
+        <Button onClick={() => goToStep(4)} disabled={!done}>
+          Next →
+        </Button>
       </div>
     </StepCard>
   )

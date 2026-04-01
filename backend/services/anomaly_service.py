@@ -9,21 +9,57 @@ from backend.core.anomaly import (
     label_anomalies_with_percentile,
     anomaly_summary,
 )
+from backend.core.preprocessing import TRANSFORM_DESCRIPTIONS
 from backend.core.methods import METHOD_REGISTRY
 from backend.config import SESSIONS_DIR
 from backend.services.score_service import load_scores
 
 
-def run_anomaly_labeling(session_id: str, method_id: str) -> dict:
+def normalize_preprocessing_mode(preprocessing_mode: str | None) -> str | None:
     """
-    Run automatic anomaly labeling for one method.
-    The preprocessing step is now selected dynamically inside label_anomalies().
+    Map frontend values to backend transform ids.
+
+    frontend:
+      auto, none, log, minmax, zscore, log_minmax
+
+    backend:
+      raw, log, minmax, zscore, log_minmax, log_zscore
+    """
+    if preprocessing_mode is None:
+        return None
+
+    normalized = preprocessing_mode.strip().lower()
+
+    if normalized == "auto":
+        return None
+
+    if normalized == "none":
+        return "raw"
+
+    allowed = set(TRANSFORM_DESCRIPTIONS.keys())
+    if normalized not in allowed:
+        raise ValueError(f"Unsupported preprocessing mode: {preprocessing_mode}")
+
+    return normalized
+
+
+def run_anomaly_labeling(
+    session_id: str,
+    method_id: str,
+    preprocessing_mode: str | None = None,
+) -> dict:
+    """
+    Run anomaly labeling for one method using either:
+    - automatic preprocessing selection, or
+    - a user-selected preprocessing mode.
     """
     config = METHOD_REGISTRY[method_id]
     score_col = config["score_column"]
 
+    transform_id = normalize_preprocessing_mode(preprocessing_mode)
+
     data = load_scores(session_id, method_id)
-    data = label_anomalies(data, score_col)
+    data = label_anomalies(data, score_col, transform_id=transform_id)
 
     labeled_dir = SESSIONS_DIR / session_id / "labeled"
     labeled_dir.mkdir(parents=True, exist_ok=True)

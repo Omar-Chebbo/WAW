@@ -5,9 +5,18 @@
 import axios from 'axios'
 import { useQuery } from '@tanstack/react-query'
 import type {
-  Dataset, GraphData, GraphStats, AnomalySummary,
-  DistributionBin, BackboneSummary, EvaluationReport, MetricMeta,
-  ResearchAnalysisResponse, ResearchNetworkId, MethodId
+  Dataset,
+  GraphData,
+  GraphStats,
+  AnomalySummary,
+  DistributionBin,
+  BackboneSummary,
+  EvaluationReport,
+  MetricMeta,
+  ResearchAnalysisResponse,
+  ResearchNetworkId,
+  MethodId,
+  PreprocessingMode,
 } from '../types'
 
 // Base URL — in dev, Vite proxies /api to localhost:8000
@@ -49,9 +58,18 @@ export const checkScoresExist = (sessionId: string, methodId: string) =>
   api.get<{ exists: boolean }>(`/scores/${sessionId}/${methodId}/exists`).then(r => r.data)
 
 // ── Anomalies ─────────────────────────────────────────────────────
-export const runAnomalyLabeling = (sessionId: string, methodId: string) =>
+export const runAnomalyLabeling = (
+  sessionId: string,
+  methodId: string,
+  preprocessingMode?: PreprocessingMode
+) =>
   api.post<{ status: string; summary: AnomalySummary }>(
-    '/anomalies/label', { session_id: sessionId, method_id: methodId }
+    '/anomalies/label',
+    {
+      session_id: sessionId,
+      method_id: methodId,
+      preprocessing_mode: preprocessingMode,
+    }
   ).then(r => r.data)
 
 export const runManualLabeling = (

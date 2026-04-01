@@ -1,243 +1,175 @@
-/**
- * pages/Step4_AnomalyLabeling.tsx
- * Runs Isolation Forest anomaly labeling for methods that need it.
- * Shows a score distribution histogram + a manual threshold slider.
- */
-import React, { useState, useEffect, useCallback } from 'react'
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer
-} from 'recharts'
-import { useWorkflowStore } from '../store/workflowStore'
-import {
-  runAnomalyLabeling, runManualLabeling, fetchDistribution
-} from '../api/client'
-import { METHODS } from '../constants/methods'
+import React, { useEffect } from 'react'
 import { StepCard, Button } from '../components/ui'
-import type { AnomalySummary, DistributionBin } from '../types'
+import { useWorkflowStore } from '../store/workflowStore'
+import { METHODS } from '../constants/methods'
+import AnomalyLabelingWorkspace from '../components/lab/AnomalyLabelingWorkspace'
+import type { MethodId, PreprocessingMode } from '../types'
 
-function formatTransformName(id?: string | null) {
-  if (!id) return 'Auto'
-  return id
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase())
-}
+const PREPROCESSING_OPTIONS: {
+  id: PreprocessingMode
+  label: string
+  description: string
+}[] = [
+  {
+    id: 'none',
+    label: 'None',
+    description: 'Use raw scores without preprocessing.',
+  },
+  {
+    id: 'log',
+    label: 'Log',
+    description: 'Compress skewed values using a log transform.',
+  },
+  {
+    id: 'minmax',
+    label: 'Min-max',
+    description: 'Scale values into a 0 to 1 range.',
+  },
+  {
+    id: 'zscore',
+    label: 'Z-score',
+    description: 'Center values using mean and standard deviation.',
+  },
+  {
+    id: 'log_minmax',
+    label: 'Log + Min-max',
+    description: 'First compress skew, then normalize to 0 to 1.',
+  },
+]
+
+const PREPROCESSING_METHODS: MethodId[] = ['pa', 'lp']
 
 export default function Step4() {
   const {
-    sessionId, selectedMethods, scoresReady,
-    anomaliesReady, setAnomalyReady, goToStep
+    selectedMethods,
+    scoresReady,
+    preprocessingByMethod,
+    setPreprocessingMode,
+    goToStep,
   } = useWorkflowStore()
 
-  // Only methods that require anomaly labeling appear on this page
   const relevantMethods = METHODS.filter(
-    m => selectedMethods.includes(m.id) && m.requires_anomaly
+    (m) => selectedMethods.includes(m.id) && m.requires_anomaly
   )
 
-  // If no method needs anomaly labeling, skip this step automatically
+  const preprocessingMethods = relevantMethods.filter((m) =>
+    PREPROCESSING_METHODS.includes(m.id)
+  )
+
   useEffect(() => {
     if (scoresReady && relevantMethods.length === 0) {
       goToStep(5)
     }
   }, [scoresReady, relevantMethods.length, goToStep])
 
-  const [activeTab,   setActiveTab]   = useState(relevantMethods[0]?.id ?? '')
-  const [summaries,   setSummaries]   = useState<Record<string, AnomalySummary>>({})
-  const [dists,       setDists]       = useState<Record<string, DistributionBin[]>>({})
-  const [loading,     setLoading]     = useState<Record<string, boolean>>({})
-  const [percentiles, setPercentiles] = useState<Record<string, number>>({})
-  const [debounce,    setDebounce]    = useState<Record<string, number>>({})
-
-  // Auto-run labeling for each required method when we land on this step
-  useEffect(() => {
-    relevantMethods.forEach(m => {
-      if (!anomaliesReady[m.id]) autoLabel(m.id)
-    })
-  }, [])   // eslint-disable-line
-
-  async function autoLabel(methodId: string) {
-    setLoading(l => ({ ...l, [methodId]: true }))
-    try {
-      const res = await runAnomalyLabeling(sessionId, methodId)
-      setSummaries(s => ({ ...s, [methodId]: res.summary }))
-      setAnomalyReady(methodId, true)
-      const dist = await fetchDistribution(sessionId, methodId)
-      setDists(d => ({ ...d, [methodId]: dist }))
-    } catch (e) {
-      console.error(e)
-    }
-    setLoading(l => ({ ...l, [methodId]: false }))
-  }
-
-  // Debounced re-label when slider changes
-  const handleSliderChange = useCallback((methodId: string, value: number) => {
-    setPercentiles(p => ({ ...p, [methodId]: value }))
-    if (debounce[methodId]) clearTimeout(debounce[methodId])
-    const t = setTimeout(async () => {
-      setLoading(l => ({ ...l, [methodId]: true }))
-      try {
-        const res = await runManualLabeling(sessionId, methodId, value)
-        setSummaries(s => ({ ...s, [methodId]: res.summary }))
-        const dist = await fetchDistribution(sessionId, methodId)
-        setDists(d => ({ ...d, [methodId]: dist }))
-      } catch {}
-      setLoading(l => ({ ...l, [methodId]: false }))
-    }, 350)
-    setDebounce(d => ({ ...d, [methodId]: t }))
-  }, [sessionId, debounce])
-
-  async function resetToAuto(methodId: string) {
-    setPercentiles(p => { const n={...p}; delete n[methodId]; return n })
-    await autoLabel(methodId)
-  }
-
-  const allDone = relevantMethods.every(m => anomaliesReady[m.id])
-
-  if (relevantMethods.length === 0) {
-    return (
-      <StepCard stepNumber={4} title="Anomaly Labeling" subtitle="Skipping — not needed for your selected methods.">
-        <div className="text-center py-8 text-gray-400">
-          None of your selected methods require anomaly labeling. Proceeding…
-        </div>
-        <div className="flex justify-between">
-          <Button variant="secondary" onClick={() => goToStep(3)}>← Back</Button>
-          <Button onClick={() => goToStep(5)}>Next →</Button>
-        </div>
-      </StepCard>
-    )
-  }
+  const allChosen =
+    preprocessingMethods.length === 0 ||
+    preprocessingMethods.every((m) => !!preprocessingByMethod[m.id])
 
   return (
-    <StepCard stepNumber={4} title="Anomaly Labeling"
-      subtitle="Identify backbone edges using Isolation Forest. Adjust the threshold slider to fine-tune which edges are flagged.">
+    <StepCard
+      stepNumber={4}
+      title="Anomaly Labeling"
+      subtitle="First choose the preprocessing for PA and LP, then run anomaly labeling."
+    >
+      {preprocessingMethods.length > 0 && (
+        <div className="space-y-6 mb-8">
+          <div className="rounded-xl border border-blue-100 bg-blue-50 p-5">
+            <div className="text-sm font-semibold text-blue-900 mb-1">
+              Choose preprocessing before anomaly detection
+            </div>
+            <p className="text-sm text-blue-800">
+              The user must choose preprocessing manually. No automatic recommendation is used here.
+            </p>
+          </div>
 
-      {/* Method tabs */}
-      {relevantMethods.length > 1 && (
-        <div className="flex gap-2 mb-6 border-b border-gray-100 pb-3">
-          {relevantMethods.map(m => (
-            <button key={m.id} onClick={() => setActiveTab(m.id)}
-              className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${
-                activeTab === m.id ? 'text-white' : 'text-gray-500 hover:bg-gray-50'
-              }`}
-              style={activeTab === m.id ? { backgroundColor: m.color } : {}}>
-              {m.short}
-            </button>
-          ))}
+          {preprocessingMethods.map((method) => {
+            const selectedMode = preprocessingByMethod[method.id]
+
+            return (
+              <div
+                key={method.id}
+                className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm"
+              >
+                <div className="flex items-start justify-between gap-4 mb-4">
+                  <div>
+                    <div className="text-base font-bold text-navy">
+                      {method.short} — {method.label}
+                    </div>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Select the preprocessing that should be applied before anomaly detection.
+                    </p>
+                  </div>
+
+                  <span
+                    className="px-3 py-1 rounded-full text-white text-xs font-semibold"
+                    style={{ backgroundColor: method.color }}
+                  >
+                    {selectedMode ? `Selected: ${selectedMode}` : 'Not selected'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {PREPROCESSING_OPTIONS.map((option) => {
+                    const active = selectedMode === option.id
+
+                    return (
+                      <button
+                        key={option.id}
+                        onClick={() => setPreprocessingMode(method.id, option.id)}
+                        className={
+                          active
+                            ? 'text-left rounded-xl border p-4 transition-all border-teal bg-teal/5 ring-1 ring-teal'
+                            : 'text-left rounded-xl border p-4 transition-all border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
+                        }
+                      >
+                        <div className="flex items-center justify-between gap-3 mb-1">
+                          <span className="text-sm font-semibold text-navy">
+                            {option.label}
+                          </span>
+
+                          {active && (
+                            <span className="text-xs font-semibold text-teal">
+                              Selected
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-sm text-gray-500">
+                          {option.description}
+                        </p>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
 
-      {relevantMethods.filter(m => m.id === (relevantMethods.length === 1 ? m.id : activeTab)).map(m => {
-        const summary = summaries[m.id]
-        const dist    = dists[m.id] ?? []
-        const isLoading = loading[m.id]
-        const pct   = percentiles[m.id]
-        const isManual = pct !== undefined
-
-        return (
-          <div key={m.id}>
-            {/* Loading state */}
-            {isLoading && (
-              <div className="flex items-center gap-3 py-8 justify-center text-gray-400">
-                <svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                </svg>
-                <span>Running Isolation Forest…</span>
-              </div>
-            )}
-
-            {/* Stats row */}
-            {summary && !isLoading && (
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                <div className="bg-gray-50 rounded-xl p-4 text-center">
-                  <div className="text-2xl font-bold" style={{ color: m.color }}>
-                    {summary.flagged.toLocaleString()}
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">Backbone edges</div>
-                </div>
-                <div className="bg-gray-50 rounded-xl p-4 text-center">
-                  <div className="text-2xl font-bold text-gray-700">{summary.pct}%</div>
-                  <div className="text-xs text-gray-500 mt-1">of total edges</div>
-                </div>
-                <div className="bg-gray-50 rounded-xl p-4 text-center">
-                  <div className="text-2xl font-bold text-gray-700">{summary.total.toLocaleString()}</div>
-                  <div className="text-xs text-gray-500 mt-1">Total edges</div>
-                </div>
-                <div className="bg-gray-50 rounded-xl p-4 text-center">
-                  <div className="text-lg font-bold text-gray-700">
-                    {formatTransformName(summary.selected_transform)}
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">Auto preprocessing</div>
-                </div>
-              </div>
-            )}
-
-            {/* Distribution histogram */}
-            {dist.length > 0 && !isLoading && (
-              <div className="mb-6">
-                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
-                  Score Distribution
-                </div>
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={dist} margin={{ left: -20 }}>
-                    <XAxis dataKey="bin" tickFormatter={v => v.toFixed(1)} tick={{ fontSize: 10 }} />
-                    <YAxis tick={{ fontSize: 10 }} />
-                    <Tooltip
-                      formatter={(val, name) => [val, name === 'backbone' ? 'Backbone edges' : 'Normal edges']}
-                      labelFormatter={l => `Score ≈ ${Number(l).toFixed(2)}`}
-                    />
-                    <Legend formatter={v => v === 'backbone' ? 'Backbone (flagged)' : 'Normal'} />
-                    <Bar dataKey="normal"   fill="#d1d5db" stackId="a" />
-                    <Bar dataKey="backbone" fill={m.color}   stackId="a" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-
-            {/* Threshold slider */}
-            {summary && !isLoading && (
-              <div className="bg-gray-50 rounded-xl p-5 mb-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="text-sm font-semibold text-navy">Manual Threshold</div>
-                  {isManual && (
-                    <button onClick={() => resetToAuto(m.id)}
-                      className="text-xs text-teal hover:underline">
-                      ↺ Reset to auto (Isolation Forest)
-                    </button>
-                  )}
-                </div>
-                <div className="text-xs text-gray-500 mb-4">
-                  Edges in the top <strong>{100 - (pct ?? 80)}%</strong> of scores are flagged as backbone.
-                  {!isManual && <span className="text-teal ml-2">(currently using Isolation Forest auto-detection)</span>}
-                </div>
-                <input type="range" min={0} max={99} step={1}
-                  value={pct ?? 80}
-                  onChange={e => handleSliderChange(m.id, Number(e.target.value))}
-                  className="w-full accent-teal"
-                />
-                <div className="flex justify-between text-xs text-gray-400 mt-1">
-                  <span>More edges</span>
-                  <span>Fewer edges</span>
-                </div>
-              </div>
-            )}
-
-            {/* Done indicator */}
-            {anomaliesReady[m.id] && !isLoading && (
-              <div className="flex items-center gap-2 text-sm text-teal">
-                <span>✅</span>
-                <span>Labeling complete for {m.short}</span>
-              </div>
-            )}
+      {!allChosen ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-5">
+          <div className="text-sm font-semibold text-amber-800 mb-1">
+            Preprocessing selection required
           </div>
-        )
-      })}
+          <p className="text-sm text-amber-700">
+            Choose preprocessing for every required method above to continue with anomaly labeling.
+          </p>
 
-      <div className="flex justify-between pt-6">
-        <Button variant="secondary" onClick={() => goToStep(3)}>← Back</Button>
-        <Button onClick={() => goToStep(5)} disabled={!allDone}>
-          Next: Extract Backbone →
-        </Button>
-      </div>
+          <div className="flex justify-between pt-6">
+            <Button variant="secondary" onClick={() => goToStep(3)}>
+              ← Back
+            </Button>
+
+            <Button disabled>
+              Next: Extract Backbone →
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <AnomalyLabelingWorkspace mode="wizard" />
+      )}
     </StepCard>
   )
 }

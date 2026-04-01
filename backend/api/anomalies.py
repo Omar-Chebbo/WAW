@@ -17,7 +17,8 @@ router = APIRouter()
 
 class LabelRequest(BaseModel):
     session_id: str
-    method_id:  str
+    method_id: str
+    preprocessing_mode: str | None = None
 
 
 class RelabelRequest(BaseModel):
@@ -29,7 +30,11 @@ class RelabelRequest(BaseModel):
 @router.post("/label")
 def label(req: LabelRequest):
     try:
-        summary = run_anomaly_labeling(req.session_id, req.method_id)
+        summary = run_anomaly_labeling(
+            req.session_id,
+            req.method_id,
+            req.preprocessing_mode,
+        )
         return {"status": "ok", "summary": summary}
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))

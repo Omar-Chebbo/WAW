@@ -115,12 +115,34 @@ export interface SessionState {
   datasetStats: GraphStats | null
   selectedMethods: MethodId[]
   scoresReady: boolean
-  anomaliesReady: Record<string, boolean>   // { method_id: true/false }
+  anomaliesReady: Record<string, boolean>
   backbonesReady: Record<string, boolean>
   evaluationReady: boolean
   currentStep: WizardStep
+
+  currentView: AppView
+  labTab: LabTab
+  preprocessingByMethod: Partial<Record<MethodId, PreprocessingMode>>
+  
 }
 
+export type PreprocessingMode =
+  | 'none'
+  | 'log'
+  | 'minmax'
+  | 'zscore'
+  | 'log_minmax'
+
+
+export type AppView = 'wizard' | 'lab'
+
+export type LabTab =
+  | 'scores'
+  | 'preprocessing'
+  | 'labeling'
+  | 'backbone'
+  | 'visualization'
+  | 'exports'
 
 // ── Distribution types ────────────────────────────────────────────
 export interface DistributionSeries {

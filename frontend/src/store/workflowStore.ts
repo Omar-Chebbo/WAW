@@ -6,7 +6,16 @@
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { SessionState, WizardStep, MethodId, GraphStats } from '../types'
+import type {
+  SessionState,
+  WizardStep,
+  MethodId,
+  GraphStats,
+  AppView,
+  LabTab,
+  PreprocessingMode,
+} from '../types'
+
 
 // Generate a unique session ID using the browser's built-in crypto API
 function makeSessionId(): string {
@@ -26,7 +35,13 @@ interface WorkflowActions {
   setBackboneReady: (method: string, v: boolean) => void
   setEvaluationReady: (v: boolean) => void
   goToStep: (step: WizardStep) => void
+
+  setView: (view: AppView) => void
+  setLabTab: (tab: LabTab) => void
+  openExperimentLab: (tab?: LabTab) => void
+
   resetSession: () => void
+  setPreprocessingMode: (method: MethodId, mode: PreprocessingMode) => void
 }
 
 const initialState: SessionState = {
@@ -40,12 +55,31 @@ const initialState: SessionState = {
   backbonesReady:  {},
   evaluationReady: false,
   currentStep:     1,
+
+  currentView:     'wizard',
+  labTab:          'scores',
+  preprocessingByMethod: {},
 }
 
 export const useWorkflowStore = create<SessionState & WorkflowActions>()(
   persist(
     (set) => ({
       ...initialState,
+            setView: (view) =>
+        set({ currentView: view }),
+
+      setPreprocessingMode: (method, mode) =>
+      set((s) => ({
+        preprocessingByMethod: {
+          ...s.preprocessingByMethod,
+          [method]: mode,
+        },
+      })),
+      setLabTab: (tab) =>
+        set({ labTab: tab }),
+
+      openExperimentLab: (tab = 'scores') =>
+        set({ currentView: 'lab', labTab: tab }),
 
       setDataset: (id, isCustom, stats) =>
         set({ datasetId: id, isCustomDataset: isCustom, datasetStats: stats }),

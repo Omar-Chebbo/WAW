@@ -7,6 +7,7 @@
 import React, { useEffect, useRef, useCallback } from 'react'
 import * as d3 from 'd3'
 import type { GraphData, GraphNode, GraphLink } from '../../types'
+import { downloadSvgElement, downloadPngElement } from '../../utils/svgExport'
 
 interface Props {
   data: GraphData
@@ -26,40 +27,8 @@ function edgeKey(s: string, t: string) {
   return s < t ? `${s}--${t}` : `${t}--${s}`
 }
 
-/** Serialise the SVG element to a .svg file and trigger browser download */
-function downloadSVG(svgEl: SVGSVGElement, filename: string) {
-  const serializer = new XMLSerializer()
-  const source = serializer.serializeToString(svgEl)
-  const blob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
-}
 
-/** Convert SVG → Canvas → PNG and trigger download */
-function downloadPNG(svgEl: SVGSVGElement, filename: string) {
-  const serializer = new XMLSerializer()
-  const source = serializer.serializeToString(svgEl)
-  const img = new Image()
-  const svg64 = btoa(unescape(encodeURIComponent(source)))
-  img.onload = () => {
-    const canvas = document.createElement('canvas')
-    canvas.width = svgEl.clientWidth || 800
-    canvas.height = svgEl.clientHeight || 480
-    const ctx = canvas.getContext('2d')!
-    ctx.fillStyle = '#ffffff'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    ctx.drawImage(img, 0, 0)
-    const a = document.createElement('a')
-    a.href = canvas.toDataURL('image/png')
-    a.download = filename
-    a.click()
-  }
-  img.src = 'data:image/svg+xml;base64,' + svg64
-}
+
 
 export function GraphCanvas({
   data,
@@ -240,20 +209,27 @@ export function GraphCanvas({
       {downloadLabel && (
         <div className="absolute top-2 right-2 flex gap-1">
           <button
-            onClick={() => svgRef.current && downloadSVG(svgRef.current, `${downloadLabel}.svg`)}
+            onClick={() =>
+              svgRef.current &&
+              downloadSvgElement(svgRef.current, `${downloadLabel}.svg`)
+            }
             className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
-                       hover:bg-gray-50 text-gray-600 font-medium"
+                      hover:bg-gray-50 text-gray-600 font-medium"
             title="Download SVG"
           >
             ⬇ SVG
           </button>
+
           <button
-            onClick={() => svgRef.current && downloadPNG(svgRef.current, `${downloadLabel}.png`)}
+            onClick={() =>
+              svgRef.current &&
+              void downloadPngElement(svgRef.current, `${downloadLabel}.png`, { scale: 4 })
+            }
             className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
-                       hover:bg-gray-50 text-gray-600 font-medium"
-            title="Download PNG"
+                      hover:bg-gray-50 text-gray-600 font-medium"
+            title="Download high-resolution PNG"
           >
-            ⬇ PNG
+            ⬇ PNG 4x
           </button>
         </div>
       )}

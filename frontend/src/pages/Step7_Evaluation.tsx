@@ -16,8 +16,9 @@ import {
 } from '../api/client'
 import { METHODS } from '../constants/methods'
 import { StepCard, Button } from '../components/ui'
-import ResearchAnalysisPanel from '../components/research/ResearchAnalysisPanel'
+
 import type { EvaluationReport, DistributionReport } from '../types'
+import { downloadPngByContainerId, downloadSvgByContainerId } from '../utils/svgExport'
 
 // Deviation → badge colour
 function deviationColour(d: number) {
@@ -69,31 +70,7 @@ function toCCDF(values: number[]): Array<{ x: number; y: number }> {
   return result
 }
 
-// ── Download a recharts chart container as PNG ────────────────────
-function downloadChartPNG(containerId: string, filename: string) {
-  const el = document.getElementById(containerId)
-  if (!el) return
-  const svgEl = el.querySelector('svg')
-  if (!svgEl) return
-  const serializer = new XMLSerializer()
-  const source = serializer.serializeToString(svgEl)
-  const img = new Image()
-  img.onload = () => {
-    const canvas = document.createElement('canvas')
-    canvas.width  = svgEl.clientWidth  || 600
-    canvas.height = svgEl.clientHeight || 300
-    const ctx = canvas.getContext('2d')!
-    ctx.fillStyle = '#ffffff'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    ctx.drawImage(img, 0, 0)
-    const a = document.createElement('a')
-    a.href     = canvas.toDataURL('image/png')
-    a.download = filename
-    a.click()
-  }
-  const svg64 = btoa(unescape(encodeURIComponent(source)))
-  img.src = 'data:image/svg+xml;base64,' + svg64
-}
+
 
 // ── Distribution Panel ─────────────────────────────────────────────
 function DistributionPanel({
@@ -209,13 +186,34 @@ function DistributionPanel({
           <h3 className="text-sm font-semibold text-navy">
             Node Degree Distribution (CCDF)
           </h3>
-          <button
-            onClick={() => downloadChartPNG('chart-degree', `degree-distribution-${sessionId}.png`)}
-            className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
-                       hover:bg-gray-50 text-gray-600 font-medium"
-          >
-            ⬇ PNG
-          </button>
+            <div className="flex gap-2">
+  <button
+    onClick={() =>
+      downloadSvgByContainerId(
+        'chart-weight',
+        `weight-distribution-${sessionId}.svg`
+      )
+    }
+    className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
+               hover:bg-gray-50 text-gray-600 font-medium"
+  >
+    ⬇ SVG
+  </button>
+
+  <button
+    onClick={() =>
+      void downloadPngByContainerId(
+        'chart-weight',
+        `weight-distribution-${sessionId}.png`,
+        4
+      )
+    }
+    className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
+               hover:bg-gray-50 text-gray-600 font-medium"
+  >
+    ⬇ PNG 4x
+  </button>
+</div>
         </div>
         <div id="chart-degree">
           <ResponsiveContainer width="100%" height={280}>
@@ -283,13 +281,34 @@ function DistributionPanel({
           <h3 className="text-sm font-semibold text-navy">
             Edge Weight Distribution (CCDF)
           </h3>
-          <button
-            onClick={() => downloadChartPNG('chart-weight', `weight-distribution-${sessionId}.png`)}
-            className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
-                       hover:bg-gray-50 text-gray-600 font-medium"
-          >
-            ⬇ PNG
-          </button>
+          <div className="flex gap-2">
+  <button
+    onClick={() =>
+      downloadSvgByContainerId(
+        'chart-degree',
+        `degree-distribution-${sessionId}.svg`
+      )
+    }
+    className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
+               hover:bg-gray-50 text-gray-600 font-medium"
+  >
+    ⬇ SVG
+  </button>
+
+  <button
+    onClick={() =>
+      void downloadPngByContainerId(
+        'chart-degree',
+        `degree-distribution-${sessionId}.png`,
+        4
+      )
+    }
+    className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
+               hover:bg-gray-50 text-gray-600 font-medium"
+  >
+    ⬇ PNG 4x
+  </button>
+</div>
         </div>
         <div id="chart-weight">
           <ResponsiveContainer width="100%" height={280}>
@@ -510,17 +529,11 @@ const [error,     setError]     = useState<string | null>(null)
           {/* TABLE VIEW — matches paper Table 2 format */}
 {viewMode === 'table' && (
   <div className="overflow-x-auto">
-    <div className="flex items-center justify-between mb-3">
-      <span className="text-xs text-gray-400">
-        Topological properties of extracted backbones (matches Table 2 in paper)
-      </span>
-      <button
-        onClick={() => downloadChartPNG('eval-table', `metrics-table-${sessionId}.png`)}
-        className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
-                   hover:bg-gray-50 text-gray-600 font-medium">
-        ⬇ PNG
-      </button>
-    </div>
+   <div className="flex items-center justify-between mb-3">
+  <span className="text-xs text-gray-400">
+    Topological properties of extracted backbones 
+  </span>
+</div>
     <div id="eval-table">
       <table className="w-full text-sm border-collapse">
         <thead>
@@ -596,14 +609,34 @@ const [error,     setError]     = useState<string | null>(null)
           {/* RADAR VIEW */}
             {viewMode === 'radar' && radarData.length > 0 && (
               <div>
-                <div className="flex justify-end mb-2">
-                  <button
-                    onClick={() => downloadChartPNG('chart-radar', `radar-chart-${sessionId}.png`)}
-                    className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
-                              hover:bg-gray-50 text-gray-600 font-medium">
-                    ⬇ PNG
-                  </button>
-                </div>
+                <div className="flex justify-end mb-2 gap-2">
+  <button
+    onClick={() =>
+      downloadSvgByContainerId(
+        'chart-radar',
+        `radar-chart-${sessionId}.svg`
+      )
+    }
+    className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
+              hover:bg-gray-50 text-gray-600 font-medium"
+  >
+    ⬇ SVG
+  </button>
+
+  <button
+    onClick={() =>
+      void downloadPngByContainerId(
+        'chart-radar',
+        `radar-chart-${sessionId}.png`,
+        4
+      )
+    }
+    className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
+              hover:bg-gray-50 text-gray-600 font-medium"
+  >
+    ⬇ PNG 4x
+  </button>
+</div>
                 <div id="chart-radar">
                 <ResponsiveContainer width="100%" height={400}>
                 <RadarChart data={radarData}>
@@ -640,9 +673,7 @@ const [error,     setError]     = useState<string | null>(null)
               sessionId={sessionId}
             />
           )}
-      <div className="mt-10 pt-8 border-t border-gray-100">
-        <ResearchAnalysisPanel />
-      </div>
+      
 
       <div className="flex justify-between pt-6">
         <Button variant="secondary" onClick={() => goToStep(6)}>← Back</Button>

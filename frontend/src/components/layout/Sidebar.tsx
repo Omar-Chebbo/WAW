@@ -4,7 +4,7 @@
  */
 import React from 'react'
 import clsx from 'clsx'
-import { CheckCircle, Circle, Lock } from 'lucide-react'
+import { CheckCircle, Circle, Lock, FlaskConical, List } from 'lucide-react'
 import { useWorkflowStore } from '../../store/workflowStore'
 import type { WizardStep } from '../../types'
 
@@ -19,8 +19,19 @@ const STEPS = [
 ]
 
 export function Sidebar() {
-  const { currentStep, goToStep, datasetId, selectedMethods,
-          scoresReady, anomaliesReady, backbonesReady, resetSession } = useWorkflowStore()
+    const {
+    currentStep,
+    currentView,
+    goToStep,
+    setView,
+    openExperimentLab,
+    datasetId,
+    selectedMethods,
+    scoresReady,
+    anomaliesReady,
+    backbonesReady,
+    resetSession,
+  } = useWorkflowStore()
 
   // A step is "unlocked" if all its prerequisites are met
   function isUnlocked(n: WizardStep) {
@@ -42,6 +53,35 @@ export function Sidebar() {
         <div className="text-teal-bg text-xs opacity-70">Explorer</div>
       </div>
 
+            <div className="mb-6 grid grid-cols-2 gap-2 px-2">
+        <button
+          onClick={() => setView('wizard')}
+          className={clsx(
+            'flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all',
+            currentView === 'wizard'
+              ? 'bg-white text-navy'
+              : 'bg-white/10 text-gray-300 hover:bg-white/15'
+          )}
+        >
+          <List size={14} />
+          Wizard
+        </button>
+
+        <button
+          onClick={() => openExperimentLab('scores')}
+          className={clsx(
+            'flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all',
+            currentView === 'lab'
+              ? 'bg-teal text-white'
+              : 'bg-white/10 text-gray-300 hover:bg-white/15'
+          )}
+        >
+          <FlaskConical size={14} />
+          Lab
+        </button>
+      </div>
+
+
       {/* Step list */}
       <nav className="flex flex-col gap-1">
         {STEPS.map(({ n, label }) => {
@@ -52,7 +92,11 @@ export function Sidebar() {
           return (
             <button
               key={n}
-              onClick={() => unlocked && goToStep(n)}
+              onClick={() => {
+                if (!unlocked) return
+                setView('wizard')
+                goToStep(n)
+              }}
               disabled={!unlocked}
               className={clsx(
                 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left transition-all',
