@@ -3,10 +3,14 @@ backend/core/anomaly.py
 Pure-function anomaly labeling — no file I/O here.
 The service layer handles reading/writing files.
 """
+
 from __future__ import annotations
 
+import networkx as nx
 import numpy as np
 import pandas as pd
+from netbone.backbone import Backbone
+from netbone.filters import fraction_filter, threshold_filter
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import MinMaxScaler
 
@@ -34,7 +38,11 @@ def label_anomalies(
       {column}_anomaly               -> +1 normal, -1 backbone
       {column}_preprocessing         -> transform name used for this run
     """
+
     scores = data[column].to_numpy(dtype=float)
+
+    # get the number of edges for max_samples in Isolation Forest
+    num_edges = len(data)
 
     decision = choose_preprocessing(scores)
     selected_transform = transform_id or decision["selected_transform"]
@@ -44,7 +52,9 @@ def label_anomalies(
 
     X = transformed.reshape(-1, 1)
 
-    clf = IsolationForest(contamination=contamination, random_state=42)
+    clf = IsolationForest(
+        contamination=contamination, max_samples=num_edges, random_state=42
+    )
     clf.fit(X)
 
     labels = clf.predict(X)
@@ -77,7 +87,16 @@ def label_anomalies(
     data[f"{column}_distribution_skewness"] = decision["decision_features"]["skewness"]
     data[f"{column}_zero_ratio"] = decision["decision_features"]["zero_ratio"]
 
-    return data
+    g = nx.from_pandas_edgelist(data, edge_attr=True)
+
+    return Backbone(
+        g,
+        method_name="Anomaly Backbone",
+        property_name=f"{column}_if_score_samples",
+        ascending=True,
+        compatible_filters=[threshold_filter, fraction_filter],
+        filter_on="Edges",
+    )
 
 
 def label_anomalies_with_percentile(
@@ -158,11 +177,19 @@ def anomaly_summary(data: pd.DataFrame, column: str) -> dict:
         "flagged": flagged,
         "total": total,
         "pct": pct,
-        "score_min": round(float(backbone_scores.min()), 4) if len(backbone_scores) else 0,
-        "score_max": round(float(backbone_scores.max()), 4) if len(backbone_scores) else 0,
-        "score_mean": round(float(backbone_scores.mean()), 4) if len(backbone_scores) else 0,
+        "score_min": round(float(backbone_scores.min()), 4)
+        if len(backbone_scores)
+        else 0,
+        "score_max": round(float(backbone_scores.max()), 4)
+        if len(backbone_scores)
+        else 0,
+        "score_mean": round(float(backbone_scores.mean()), 4)
+        if len(backbone_scores)
+        else 0,
         "selected_transform": selected_transform,
         "threshold": round(threshold, 6) if threshold is not None else None,
         "contamination": contamination,
-        "distribution_skewness": round(distribution_skewness, 6) if distribution_skewness is not None else None,
+        "distribution_skewness": round(distribution_skewness, 6)
+        if distribution_skewness is not None
+        else None,
     }
