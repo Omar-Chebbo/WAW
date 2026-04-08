@@ -17,9 +17,11 @@ import type {
   ResearchNetworkId,
   MethodId,
   PreprocessingMode,
+  AnomalyInspector,
+  ContaminationExperimentResponse,
+  ContaminationScoreSource,
 } from '../types'
 
-// Base URL — in dev, Vite proxies /api to localhost:8000
 const api = axios.create({ baseURL: '/api' })
 
 // ── Datasets ──────────────────────────────────────────────────────
@@ -61,7 +63,8 @@ export const checkScoresExist = (sessionId: string, methodId: string) =>
 export const runAnomalyLabeling = (
   sessionId: string,
   methodId: string,
-  preprocessingMode?: PreprocessingMode
+  preprocessingMode?: PreprocessingMode,
+  contamination?: number
 ) =>
   api.post<{ status: string; summary: AnomalySummary }>(
     '/anomalies/label',
@@ -69,6 +72,7 @@ export const runAnomalyLabeling = (
       session_id: sessionId,
       method_id: methodId,
       preprocessing_mode: preprocessingMode,
+      contamination,
     }
   ).then(r => r.data)
 
@@ -83,6 +87,11 @@ export const runManualLabeling = (
 export const fetchDistribution = (sessionId: string, methodId: string) =>
   api.get<DistributionBin[]>(
     `/anomalies/${sessionId}/${methodId}/distribution`
+  ).then(r => r.data)
+
+export const fetchAnomalyInspector = (sessionId: string, methodId: string) =>
+  api.get<AnomalyInspector>(
+    `/anomalies/${sessionId}/${methodId}/inspector`
   ).then(r => r.data)
 
 // ── Backbone ──────────────────────────────────────────────────────
@@ -114,7 +123,6 @@ export const downloadEvaluationCsv = (sessionId: string) => {
   window.open(`/api/evaluation/${sessionId}/export/csv`, '_blank')
 }
 
-
 // ── Distributions ─────────────────────────────────────────────────
 export const fetchDistributions = (
   sessionId: string,
@@ -132,6 +140,26 @@ export const fetchDistributions = (
     })
     .then((r) => r.data)
 
+
+export const runContaminationExperiment = (params: {
+  datasetId: string
+  methodId: string
+  contaminationValues: string[]
+  preprocessingMode?: PreprocessingMode
+  scoreSource?: ContaminationScoreSource
+  sessionId?: string | null
+  isCustom?: boolean
+}) =>
+  api.post<ContaminationExperimentResponse>('/research/contamination', {
+    dataset_id: params.datasetId,
+    method_id: params.methodId,
+    contamination_values: params.contaminationValues,
+    preprocessing_mode: params.preprocessingMode ?? 'none',
+    score_source: params.scoreSource ?? 'compute_fresh',
+    session_id: params.sessionId ?? null,
+    is_custom: params.isCustom ?? false,
+  }).then(r => r.data)
+
 // ── Research analysis ─────────────────────────────────────────────
 export const runResearchAnalysis = (
   networkId: ResearchNetworkId,
@@ -141,5 +169,3 @@ export const runResearchAnalysis = (
     network_id: networkId,
     method_id: methodId,
   }).then(r => r.data)
-
-  

@@ -46,6 +46,7 @@ export default function Step4() {
     preprocessingByMethod,
     setPreprocessingMode,
     goToStep,
+    openExperimentLab,
   } = useWorkflowStore()
 
   const relevantMethods = METHODS.filter(
@@ -70,17 +71,26 @@ export default function Step4() {
     <StepCard
       stepNumber={4}
       title="Anomaly Labeling"
-      subtitle="First choose the preprocessing for PA and LP, then run anomaly labeling."
+      subtitle="Single-run labeling for the wizard. Use the dedicated Lab contamination page for multi-run contamination comparison."
     >
       {preprocessingMethods.length > 0 && (
         <div className="space-y-6 mb-8">
           <div className="rounded-xl border border-blue-100 bg-blue-50 p-5">
-            <div className="text-sm font-semibold text-blue-900 mb-1">
-              Choose preprocessing before anomaly detection
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="text-sm font-semibold text-blue-900 mb-1">
+                  Wizard Step 4 = simple single-run inspection
+                </div>
+                <p className="text-sm text-blue-800 max-w-3xl leading-6">
+                  Choose preprocessing, run one anomaly-labeling configuration deliberately, and inspect the score flow.
+                  For real contamination comparison across many values, use the dedicated contamination study in the Lab.
+                </p>
+              </div>
+
+              <Button variant="secondary" onClick={() => openExperimentLab('contamination')}>
+                Open Contamination Lab
+              </Button>
             </div>
-            <p className="text-sm text-blue-800">
-              The user must choose preprocessing manually. No automatic recommendation is used here.
-            </p>
           </div>
 
           {preprocessingMethods.map((method) => {
@@ -97,7 +107,7 @@ export default function Step4() {
                       {method.short} — {method.label}
                     </div>
                     <p className="text-sm text-gray-500 mt-1">
-                      Select the preprocessing that should be applied before anomaly detection.
+                      Raw scores remain the safer default for the current PA/LP pipeline. Change this only when you intentionally want a different single-run check.
                     </p>
                   </div>
 

@@ -10,6 +10,7 @@ from backend.services.anomaly_service import (
     run_manual_labeling,
     load_labeled,
     get_score_distribution,
+    get_anomaly_inspector,
 )
 
 router = APIRouter()
@@ -19,12 +20,13 @@ class LabelRequest(BaseModel):
     session_id: str
     method_id: str
     preprocessing_mode: str | None = None
+    contamination: float | None = None
 
 
 class RelabelRequest(BaseModel):
-    session_id:  str
-    method_id:   str
-    percentile:  float   # 0-100
+    session_id: str
+    method_id: str
+    percentile: float   # 0-100
 
 
 @router.post("/label")
@@ -34,10 +36,13 @@ def label(req: LabelRequest):
             req.session_id,
             req.method_id,
             req.preprocessing_mode,
+            req.contamination,
         )
         return {"status": "ok", "summary": summary}
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @router.post("/relabel")
@@ -61,3 +66,11 @@ def get_labeled(session_id: str, method_id: str):
 @router.get("/{session_id}/{method_id}/distribution")
 def get_distribution(session_id: str, method_id: str):
     return get_score_distribution(session_id, method_id)
+
+
+@router.get("/{session_id}/{method_id}/inspector")
+def get_inspector(session_id: str, method_id: str):
+    try:
+        return get_anomaly_inspector(session_id, method_id)
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))

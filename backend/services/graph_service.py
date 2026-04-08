@@ -4,6 +4,7 @@ Handles loading graphs from CSV, computing stats, and converting
 to the JSON format that D3.js expects on the frontend.
 """
 import random
+from typing import Optional
 import networkx as nx
 import pandas as pd
 from pathlib import Path
@@ -40,6 +41,11 @@ def load_graph(csv_path: Path) -> nx.Graph:
     return G
 
 
+def stable_edge_key(source: object, target: object) -> str:
+    left, right = sorted((str(source), str(target)))
+    return f"{left}|{right}"
+
+
 def graph_stats(G: nx.Graph) -> dict:
     """Return a dict of basic statistics about the graph."""
     n   = len(G.nodes())
@@ -66,7 +72,7 @@ def graph_stats(G: nx.Graph) -> dict:
     }
 
 
-def graph_to_json(G: nx.Graph, max_edges: int = 1500) -> dict:
+def graph_to_json(G: nx.Graph, max_edges: Optional[int] = 1500) -> dict:
     """
     Convert a networkx Graph to the D3 node-link JSON format.
     If the graph is very large, sample edges to keep the browser fast.
@@ -74,7 +80,7 @@ def graph_to_json(G: nx.Graph, max_edges: int = 1500) -> dict:
     edges = list(G.edges(data=True))
     sampled = False
 
-    if len(edges) > max_edges:
+    if max_edges is not None and len(edges) > max_edges:
         edges   = random.sample(edges, max_edges)
         sampled = True
 
@@ -97,6 +103,7 @@ def graph_to_json(G: nx.Graph, max_edges: int = 1500) -> dict:
             "source": str(u),
             "target": str(v),
             "weight": float(d.get("weight", 1)),
+            "edge_key": stable_edge_key(u, v),
         }
         for u, v, d in edges
     ]

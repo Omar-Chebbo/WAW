@@ -10,7 +10,8 @@ export interface GraphLink {
   source: string | GraphNode
   target: string | GraphNode
   weight: number
-  [key: string]: unknown   // extra score columns
+  edge_key?: string
+  [key: string]: unknown
 }
 
 export interface GraphData {
@@ -58,6 +59,9 @@ export interface AnomalySummary {
   score_max: number
   score_mean: number
   selected_transform?: string | null
+  threshold?: number | null
+  contamination?: number | string | null
+  distribution_skewness?: number | null
 }
 
 export interface DistributionBin {
@@ -65,6 +69,55 @@ export interface DistributionBin {
   total: number
   backbone: number
   normal: number
+}
+
+export interface ScoreStats {
+  min: number
+  max: number
+  mean: number
+  median: number
+  std: number
+  skewness: number
+}
+
+export interface ScoreHistogramBin {
+  bin_left: number
+  bin_right: number
+  bin_center: number
+  total: number
+  anomalies: number
+  normal: number
+}
+
+export interface RankedPoint {
+  [key: string]: number
+}
+
+export interface ScatterPoint {
+  [key: string]: number
+}
+
+export interface AnomalyInspector {
+  method_id: string
+  score_column: string
+  selected_transform?: string | null
+  threshold?: number | null
+  contamination?: number | string | null
+  counts: AnomalySummary
+  stats: {
+    raw: ScoreStats
+    transformed: ScoreStats
+    score_samples: ScoreStats
+    decision_function: ScoreStats
+  }
+  histograms: {
+    raw: ScoreHistogramBin[]
+    transformed: ScoreHistogramBin[]
+    score_samples: ScoreHistogramBin[]
+    decision_function: ScoreHistogramBin[]
+  }
+  ranked_points: RankedPoint[]
+  scatter_points: ScatterPoint[]
 }
 
 // ── Backbone types ────────────────────────────────────────────────
@@ -108,6 +161,24 @@ export interface ProgressEvent {
 // ── Session / wizard state ────────────────────────────────────────
 export type WizardStep = 1 | 2 | 3 | 4 | 5 | 6 | 7
 
+export type PreprocessingMode =
+  | 'none'
+  | 'log'
+  | 'minmax'
+  | 'zscore'
+  | 'log_minmax'
+
+export type AppView = 'wizard' | 'lab'
+
+export type LabTab =
+  | 'scores'
+  | 'preprocessing'
+  | 'labeling'
+  | 'backbone'
+  | 'visualization'
+  | 'exports'
+  | 'contamination'
+
 export interface SessionState {
   sessionId: string
   datasetId: string | null
@@ -119,30 +190,11 @@ export interface SessionState {
   backbonesReady: Record<string, boolean>
   evaluationReady: boolean
   currentStep: WizardStep
-
   currentView: AppView
   labTab: LabTab
   preprocessingByMethod: Partial<Record<MethodId, PreprocessingMode>>
-  
+  contaminationByMethod: Partial<Record<MethodId, number>>
 }
-
-export type PreprocessingMode =
-  | 'none'
-  | 'log'
-  | 'minmax'
-  | 'zscore'
-  | 'log_minmax'
-
-
-export type AppView = 'wizard' | 'lab'
-
-export type LabTab =
-  | 'scores'
-  | 'preprocessing'
-  | 'labeling'
-  | 'backbone'
-  | 'visualization'
-  | 'exports'
 
 // ── Distribution types ────────────────────────────────────────────
 export interface DistributionSeries {
@@ -243,4 +295,40 @@ export interface ResearchAnalysisResponse {
     runtime_classification_limitations: string
     design_tradeoff: string
   }
+}
+// ── Contamination lab types ──────────────────────────────────────
+export type ContaminationScoreSource = 'compute_fresh' | 'session_scores'
+
+export interface ContaminationRunResult {
+  contamination_label: string
+  contamination_value: number | null
+  preprocessing_used: string
+  threshold: number | null
+  decision_function_threshold: number
+  flagged_edges: number
+  edge_fraction: number
+  node_fraction: number
+  reachability: number
+  connected_components: number
+  selected_edge_keys: string[]
+  summary: AnomalySummary
+  inspector: AnomalyInspector
+  rows: Record<string, any>[]
+}
+
+export interface ContaminationExperimentResponse {
+  dataset_id: string
+  dataset_label: string
+  is_custom: boolean
+  score_source: ContaminationScoreSource
+  session_id?: string | null
+  original_graph: GraphData
+  original_edge_keys: string[]
+  method_id: string
+  method_label: string
+  score_column: string
+  preprocessing_used: string
+  stable_edge_key_format: string
+  run_count: number
+  runs: ContaminationRunResult[]
 }

@@ -36,11 +36,11 @@ export default function App() {
       <main className="flex-1 overflow-auto bg-gray-50">
         <div className="bg-white border-b border-gray-100 px-8 py-4 flex items-center justify-between">
           <h1 className="text-lg font-bold text-navy">
-            {currentView === 'lab' ? 'Research Analysis Lab' : 'Network Backbone Explorer'}
+            {currentView === 'lab' ? 'Experiment Lab' : 'Network Backbone Explorer'}
           </h1>
 
           <div className="text-xs text-gray-400">
-            {currentView === 'lab' ? 'Independent research analysis' : `Step ${currentStep} of 7`}
+            {currentView === 'lab' ? 'Independent lab experiments' : `Step ${currentStep} of 7`}
           </div>
         </div>
 

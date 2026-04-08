@@ -68,7 +68,7 @@ export function Sidebar() {
         </button>
 
         <button
-          onClick={() => openExperimentLab('scores')}
+          onClick={() => openExperimentLab('contamination')}
           className={clsx(
             'flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all',
             currentView === 'lab'

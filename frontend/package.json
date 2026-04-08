@@ -17,7 +17,9 @@
     "d3": "^7.9.0",
     "recharts": "^2.12.7",
     "clsx": "^2.1.1",
-    "lucide-react": "^0.446.0"
+    "lucide-react": "^0.446.0",
+    "graphology": "^0.26.0",
+    "sigma": "^3.0.2"
   },
   "devDependencies": {
     "@types/react": "^18.3.8",

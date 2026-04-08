@@ -16,13 +16,10 @@ import type {
   PreprocessingMode,
 } from '../types'
 
-
-// Generate a unique session ID using the browser's built-in crypto API
 function makeSessionId(): string {
   try {
     return crypto.randomUUID()
   } catch {
-    // Fallback for older browsers
     return 'sess_' + Math.random().toString(36).slice(2) + Date.now().toString(36)
   }
 }
@@ -35,50 +32,59 @@ interface WorkflowActions {
   setBackboneReady: (method: string, v: boolean) => void
   setEvaluationReady: (v: boolean) => void
   goToStep: (step: WizardStep) => void
-
   setView: (view: AppView) => void
   setLabTab: (tab: LabTab) => void
   openExperimentLab: (tab?: LabTab) => void
-
   resetSession: () => void
   setPreprocessingMode: (method: MethodId, mode: PreprocessingMode) => void
+  setContaminationMode: (method: MethodId, value: number) => void
 }
 
 const initialState: SessionState = {
-  sessionId:       makeSessionId(),
-  datasetId:       null,
+  sessionId: makeSessionId(),
+  datasetId: null,
   isCustomDataset: false,
-  datasetStats:    null,
+  datasetStats: null,
   selectedMethods: [],
-  scoresReady:     false,
-  anomaliesReady:  {},
-  backbonesReady:  {},
+  scoresReady: false,
+  anomaliesReady: {},
+  backbonesReady: {},
   evaluationReady: false,
-  currentStep:     1,
-
-  currentView:     'wizard',
-  labTab:          'scores',
+  currentStep: 1,
+  currentView: 'wizard',
+  labTab: 'contamination',
   preprocessingByMethod: {},
+  contaminationByMethod: {},
 }
 
 export const useWorkflowStore = create<SessionState & WorkflowActions>()(
   persist(
     (set) => ({
       ...initialState,
-            setView: (view) =>
+
+      setView: (view) =>
         set({ currentView: view }),
 
       setPreprocessingMode: (method, mode) =>
-      set((s) => ({
-        preprocessingByMethod: {
-          ...s.preprocessingByMethod,
-          [method]: mode,
-        },
-      })),
+        set((s) => ({
+          preprocessingByMethod: {
+            ...s.preprocessingByMethod,
+            [method]: mode,
+          },
+        })),
+
+      setContaminationMode: (method, value) =>
+        set((s) => ({
+          contaminationByMethod: {
+            ...s.contaminationByMethod,
+            [method]: value,
+          },
+        })),
+
       setLabTab: (tab) =>
         set({ labTab: tab }),
 
-      openExperimentLab: (tab = 'scores') =>
+      openExperimentLab: (tab = 'contamination') =>
         set({ currentView: 'lab', labTab: tab }),
 
       setDataset: (id, isCustom, stats) =>
