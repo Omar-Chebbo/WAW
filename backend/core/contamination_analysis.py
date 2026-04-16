@@ -11,7 +11,12 @@ from typing import Iterable
 import networkx as nx
 import pandas as pd
 
-from backend.core.anomaly import anomaly_summary, label_anomalies
+from backend.core.anomaly import (
+    anomaly_summary,
+    label_anomalies,
+    extract_result_dataframe,
+    extract_result_backbone,
+)
 from backend.core.evaluation import (
     edge_fraction,
     node_fraction,
@@ -108,12 +113,14 @@ def _run_single_contamination(
     preprocessing_mode: str,
     spec: ContaminationSpec,
 ) -> dict:
-    labeled = label_anomalies(
+    label_result = label_anomalies(
         scored_df.copy(),
         score_column,
         transform_id=preprocessing_mode,
         contamination=spec.value if spec.value is not None else "auto",
     )
+    labeled = extract_result_dataframe(label_result)
+    _ = extract_result_backbone(label_result)
 
     anomaly_col = f"{score_column}_anomaly"
     backbone_df = labeled.loc[labeled[anomaly_col] == -1].copy()

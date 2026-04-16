@@ -11,6 +11,8 @@ from backend.core.anomaly import (
     label_anomalies,
     label_anomalies_with_percentile,
     anomaly_summary,
+    extract_result_dataframe,
+    extract_result_backbone,
 )
 from backend.core.preprocessing import TRANSFORM_DESCRIPTIONS
 from backend.core.methods import METHOD_REGISTRY
@@ -73,12 +75,14 @@ def run_anomaly_labeling(
             )
 
     data = load_scores(session_id, method_id)
-    data = label_anomalies(
+    result = label_anomalies(
         data,
         score_col,
         transform_id=transform_id,
         contamination=contamination if contamination is not None else "auto",
     )
+    data = extract_result_dataframe(result)
+    _ = extract_result_backbone(result)
 
     labeled_dir = SESSIONS_DIR / session_id / "labeled"
     labeled_dir.mkdir(parents=True, exist_ok=True)
@@ -104,7 +108,7 @@ def run_manual_labeling(session_id: str, method_id: str, percentile: float) -> d
         data = load_scores(session_id, method_id)
 
     if f"{score_col}_normalized" not in data.columns:
-        data = label_anomalies(data, score_col)
+        data = extract_result_dataframe(label_anomalies(data, score_col))
 
     data = label_anomalies_with_percentile(data, score_col, percentile)
     data.to_csv(labeled_path, index=False)
@@ -234,7 +238,11 @@ def build_anomaly_inspector_from_df(data: pd.DataFrame, method_id: str) -> dict:
         "score_column": score_col,
         "selected_transform": str(data[preprocessing_col].iloc[0]) if preprocessing_col in data.columns else None,
         "threshold": float(data[threshold_col].iloc[0]) if threshold_col in data.columns else None,
-        "contamination": data[contamination_col].iloc[0] if contamination_col in data.columns else None,
+        "contamination": (
+            data[contamination_col].iloc[0].item()
+            if contamination_col in data.columns and hasattr(data[contamination_col].iloc[0], 'item')
+            else data[contamination_col].iloc[0] if contamination_col in data.columns else None
+        ),
         "counts": anomaly_summary(data, score_col),
         "stats": {
             "raw": build_score_stats(data[raw_col].values),

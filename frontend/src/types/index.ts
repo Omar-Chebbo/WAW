@@ -178,6 +178,7 @@ export type LabTab =
   | 'visualization'
   | 'exports'
   | 'contamination'
+  | 'multi_feature'
 
 export interface SessionState {
   sessionId: string
@@ -209,6 +210,137 @@ export interface MethodDistributions {
 }
 
 export type DistributionReport = Record<string, MethodDistributions>
+
+
+export type MultiFeatureScalingMode = 'none' | 'zscore' | 'minmax'
+
+export interface ExtremeEdgeRow {
+  source: string
+  target: string
+  edge_key: string
+  score: number
+  pa_score: number
+  lp_score: number
+  selected: boolean
+  selected_by_pa: boolean
+  selected_by_lp: boolean
+  selected_by_pa_lp: boolean
+  rank: number | null
+  pa_rank: number | null
+  lp_rank: number | null
+  pa_lp_rank: number | null
+  decision_function: number | null
+  score_samples: number | null
+}
+
+export interface ExtremeSelectionBalance {
+  top_10_pct: number
+  bottom_10_pct: number
+  middle_80_pct: number
+  top_10_count?: number
+  bottom_10_count?: number
+  middle_80_count?: number
+  selected_total?: number
+}
+
+export interface MultiFeatureScoreBalance extends ExtremeSelectionBalance {
+  top_10_count: number
+  bottom_10_count: number
+  middle_80_count: number
+  selected_total: number
+}
+
+export interface MultiFeatureJointCell {
+  pa_region: string
+  lp_region: string
+  selected_count: number
+  total_count: number
+  pct_of_selected: number
+}
+
+export interface MultiFeatureScoreProfile {
+  selected_total: number
+  pa_score_balance: MultiFeatureScoreBalance
+  lp_score_balance: MultiFeatureScoreBalance
+  joint_grid: MultiFeatureJointCell[]
+}
+
+export interface ExtremeAnalysis {
+  lowest: ExtremeEdgeRow[]
+  highest: ExtremeEdgeRow[]
+  selection_balance: ExtremeSelectionBalance
+}
+
+export interface MultiFeatureCaseResult {
+  method_id: string
+  label: string
+  metrics: {
+    flagged_edges: number
+    edge_fraction: number
+    node_fraction: number
+    reachability: number
+    connected_components: number
+    retained_nodes: number
+  }
+  summary: Record<string, any>
+  selected_edge_keys: string[]
+  selected_node_ids: string[]
+  extremes?: ExtremeAnalysis
+}
+
+export interface MultiFeatureScatterPoint {
+  source: string
+  target: string
+  edge_key: string
+  pa: number
+  lp: number
+  selected_by_pa: boolean
+  selected_by_lp: boolean
+  selected_by_pa_lp: boolean
+}
+
+export interface MultiFeatureQuadrantCount {
+  quadrant: string
+  total: number
+  selected: number
+}
+
+export interface MultiFeatureOverlapSummary {
+  edges: {
+    common_to_all: { count: number; sample: string[] }
+    unique: Record<string, { count: number; sample: string[] }>
+    pairwise_jaccard: Record<string, number>
+  }
+  nodes: {
+    common_to_all: { count: number; sample: string[] }
+    unique: Record<string, { count: number; sample: string[] }>
+    pairwise_jaccard: Record<string, number>
+  }
+}
+
+export interface MultiFeatureExperimentResponse {
+  dataset_id: string
+  dataset_label: string
+  is_custom: boolean
+  score_source: ContaminationScoreSource
+  session_id?: string | null
+  feature_columns: string[]
+  contamination: number | string
+  scaling_mode: MultiFeatureScalingMode
+  original_graph: GraphData
+  cases: {
+    pa: MultiFeatureCaseResult
+    lp: MultiFeatureCaseResult
+    pa_lp: MultiFeatureCaseResult
+  }
+  multi_feature_profile: MultiFeatureScoreProfile
+  scatter: {
+    points: MultiFeatureScatterPoint[]
+    quadrant_counts: MultiFeatureQuadrantCount[]
+  }
+  overlap: MultiFeatureOverlapSummary
+  interpretation: string
+}
 
 // ── Research analysis types ───────────────────────────────────────
 export type ResearchNetworkId = 'karate' | 'lesmis'

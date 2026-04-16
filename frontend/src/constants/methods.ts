@@ -38,6 +38,14 @@ export const METHODS: MethodInfo[] = [
     requires_anomaly: true,
     color: '#993C1D',
   },
+  {
+    id: 'pa_lp',
+    label: 'PA + LP (Multi-Feature)',
+    short: 'PA+LP',
+    description: 'Combines Preferential Attachment and Local Path as a two-feature anomaly-detection input for comparative research in the Lab.',
+    requires_anomaly: true,
+    color: '#0F766E',
+  },
 ]
 
 export const METHOD_MAP = Object.fromEntries(METHODS.map(m => [m.id, m]))

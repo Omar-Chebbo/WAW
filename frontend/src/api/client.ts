@@ -20,6 +20,8 @@ import type {
   AnomalyInspector,
   ContaminationExperimentResponse,
   ContaminationScoreSource,
+  MultiFeatureExperimentResponse,
+  MultiFeatureScalingMode,
 } from '../types'
 
 const api = axios.create({ baseURL: '/api' })
@@ -158,6 +160,24 @@ export const runContaminationExperiment = (params: {
     score_source: params.scoreSource ?? 'compute_fresh',
     session_id: params.sessionId ?? null,
     is_custom: params.isCustom ?? false,
+  }).then(r => r.data)
+
+
+export const runMultiFeatureExperiment = (params: {
+  datasetId: string
+  contamination?: number
+  scoreSource?: ContaminationScoreSource
+  sessionId?: string | null
+  isCustom?: boolean
+  scalingMode?: MultiFeatureScalingMode
+}) =>
+  api.post<MultiFeatureExperimentResponse>('/research/multi-feature', {
+    dataset_id: params.datasetId,
+    contamination: params.contamination ?? null,
+    score_source: params.scoreSource ?? 'compute_fresh',
+    session_id: params.sessionId ?? null,
+    is_custom: params.isCustom ?? false,
+    scaling_mode: params.scalingMode ?? 'none',
   }).then(r => r.data)
 
 // ── Research analysis ─────────────────────────────────────────────

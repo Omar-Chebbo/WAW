@@ -6,15 +6,157 @@ The service layer handles reading/writing files.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Any
+
 import networkx as nx
 import numpy as np
 import pandas as pd
-from netbone.backbone import Backbone
-from netbone.filters import fraction_filter, threshold_filter
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import MinMaxScaler
 
 from backend.core.preprocessing import apply_transformation, choose_preprocessing
+
+try:  # pragma: no cover - runtime dependency may be absent in some dev environments
+    from netbone.backbone import Backbone  # type: ignore
+    from netbone.filters import fraction_filter, threshold_filter  # type: ignore
+except Exception:  # pragma: no cover
+    class Backbone:  # lightweight fallback so the project still runs without netbone installed
+        def __init__(
+            self,
+            graph: nx.Graph,
+            method_name: str | None = None,
+            property_name: str | None = None,
+            ascending: bool | None = None,
+            compatible_filters: list[Any] | None = None,
+            filter_on: str | None = None,
+        ) -> None:
+            self.graph = graph
+            self.method_name = method_name
+            self.property_name = property_name
+            self.ascending = ascending
+            self.compatible_filters = compatible_filters or []
+            self.filter_on = filter_on
+
+    def threshold_filter(*args, **kwargs):
+        return None
+
+    def fraction_filter(*args, **kwargs):
+        return None
+
+
+@dataclass
+class AnomalyLabelResult:
+    """
+    Dual result for anomaly labeling.
+
+    - `data` keeps the full labeled DataFrame used by the current app UI/workflow.
+    - `backbone` keeps the new graph-native Backbone object introduced by the refactor.
+
+    The class intentionally forwards common DataFrame operations so older code that still
+    expects a DataFrame continues to work while the new Backbone representation is preserved.
+    """
+
+    data: pd.DataFrame
+    backbone: Backbone | None
+
+    def to_dataframe(self) -> pd.DataFrame:
+        return self.data
+
+    def to_csv(self, *args, **kwargs):
+        return self.data.to_csv(*args, **kwargs)
+
+    @property
+    def loc(self):
+        return self.data.loc
+
+    @property
+    def iloc(self):
+        return self.data.iloc
+
+    @property
+    def columns(self):
+        return self.data.columns
+
+    @property
+    def shape(self):
+        return self.data.shape
+
+    def copy(self, *args, **kwargs):
+        return self.data.copy(*args, **kwargs)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, key):
+        return self.data.__getitem__(key)
+
+    def __setitem__(self, key, value):
+        self.data.__setitem__(key, value)
+
+    def __iter__(self):
+        return iter(self.data)
+
+    def __contains__(self, item):
+        return item in self.data
+
+    def __getattr__(self, name: str):
+        return getattr(self.data, name)
+
+
+DataLike = pd.DataFrame | AnomalyLabelResult
+
+
+def _to_builtin_scalar(value: Any) -> Any:
+    if isinstance(value, (np.floating, float)):
+        return float(value)
+    if isinstance(value, (np.integer, int)):
+        return int(value)
+    return value
+
+
+def extract_result_dataframe(result: DataLike) -> pd.DataFrame:
+    if isinstance(result, AnomalyLabelResult):
+        return result.data
+    return result
+
+
+def extract_result_backbone(result: DataLike) -> Backbone | None:
+    if isinstance(result, AnomalyLabelResult):
+        return result.backbone
+    return None
+
+
+def _build_backbone_object(data: pd.DataFrame, column: str) -> Backbone | None:
+    """
+    Build the graph-native Backbone object that the refactor introduced.
+
+    The labeled DataFrame remains the source of truth for the current UI, while the returned
+    Backbone instance lets the project keep the newer abstraction the doctor wanted.
+    """
+    graph = nx.from_pandas_edgelist(
+        data,
+        source="source",
+        target="target",
+        edge_attr=True,
+    )
+
+    backbone = Backbone(
+        graph,
+        method_name="Anomaly Backbone",
+        property_name=f"{column}_if_score_samples",
+        ascending=True,
+        compatible_filters=[threshold_filter, fraction_filter],
+        filter_on="Edges",
+    )
+
+    # Best-effort bridge for future code that may want direct access to the labeled table.
+    try:
+        setattr(backbone, "labeled_data", data.copy())
+    except Exception:
+        pass
+
+    return backbone
 
 
 def label_anomalies(
@@ -22,7 +164,7 @@ def label_anomalies(
     column: str,
     transform_id: str | None = None,
     contamination: float | str = "auto",
-) -> pd.DataFrame:
+) -> AnomalyLabelResult:
     """
     Label edges as backbone (anomaly=-1) or normal (1) using Isolation Forest.
 
@@ -37,11 +179,12 @@ def label_anomalies(
       {column}_if_rank               -> abnormality rank (1 = most abnormal)
       {column}_anomaly               -> +1 normal, -1 backbone
       {column}_preprocessing         -> transform name used for this run
+
+    Returns:
+      AnomalyLabelResult(data=<labeled dataframe>, backbone=<Backbone instance>)
     """
 
     scores = data[column].to_numpy(dtype=float)
-
-    # get the number of edges for max_samples in Isolation Forest
     num_edges = len(data)
 
     decision = choose_preprocessing(scores)
@@ -53,7 +196,9 @@ def label_anomalies(
     X = transformed.reshape(-1, 1)
 
     clf = IsolationForest(
-        contamination=contamination, max_samples=num_edges, random_state=42
+        contamination=contamination,
+        max_samples=num_edges,
+        random_state=42,
     )
     clf.fit(X)
 
@@ -67,49 +212,42 @@ def label_anomalies(
     rank = np.empty_like(rank_order)
     rank[rank_order] = np.arange(1, len(score_samples) + 1)
 
-    data = data.copy()
-    data[f"{column}_transformed"] = transformed
-    data[f"{column}_normalized"] = normalized
+    labeled = data.copy()
+    labeled[f"{column}_transformed"] = transformed
+    labeled[f"{column}_normalized"] = normalized
 
     # old column kept so the rest of the project does not break
-    data[f"{column}_anomaly_score"] = decision_scores
+    labeled[f"{column}_anomaly_score"] = decision_scores
 
     # new explicit IF columns
-    data[f"{column}_if_score_samples"] = score_samples
-    data[f"{column}_if_decision_function"] = decision_scores
-    data[f"{column}_if_threshold"] = threshold
-    data[f"{column}_if_contamination"] = contamination
-    data[f"{column}_if_rank"] = rank
+    labeled[f"{column}_if_score_samples"] = score_samples
+    labeled[f"{column}_if_decision_function"] = decision_scores
+    labeled[f"{column}_if_threshold"] = threshold
+    labeled[f"{column}_if_contamination"] = contamination
+    labeled[f"{column}_if_rank"] = rank
 
-    data[f"{column}_anomaly"] = labels
-    data[f"{column}_preprocessing"] = selected_transform
-    data[f"{column}_shape_class"] = decision["shape_class"]
-    data[f"{column}_distribution_skewness"] = decision["decision_features"]["skewness"]
-    data[f"{column}_zero_ratio"] = decision["decision_features"]["zero_ratio"]
+    labeled[f"{column}_anomaly"] = labels
+    labeled[f"{column}_preprocessing"] = selected_transform
+    labeled[f"{column}_shape_class"] = decision["shape_class"]
+    labeled[f"{column}_distribution_skewness"] = decision["decision_features"]["skewness"]
+    labeled[f"{column}_zero_ratio"] = decision["decision_features"]["zero_ratio"]
 
-    g = nx.from_pandas_edgelist(data, edge_attr=True)
-
-    return Backbone(
-        g,
-        method_name="Anomaly Backbone",
-        property_name=f"{column}_if_score_samples",
-        ascending=True,
-        compatible_filters=[threshold_filter, fraction_filter],
-        filter_on="Edges",
-    )
+    backbone = _build_backbone_object(labeled, column)
+    return AnomalyLabelResult(data=labeled, backbone=backbone)
 
 
 def label_anomalies_with_percentile(
-    data: pd.DataFrame, column: str, percentile: float
+    data: DataLike, column: str, percentile: float
 ) -> pd.DataFrame:
     """
     Label edges using a manual percentile threshold instead of IsolationForest.
     Edges with normalized score >= percentile threshold are flagged as backbone (-1).
     """
+    data = extract_result_dataframe(data)
     norm_col = f"{column}_normalized"
 
     if norm_col not in data.columns:
-        data = label_anomalies(data, column)
+        data = extract_result_dataframe(label_anomalies(data, column))
 
     cutoff = np.percentile(data[norm_col].values, percentile)
 
@@ -118,7 +256,8 @@ def label_anomalies_with_percentile(
     return data
 
 
-def anomaly_summary(data: pd.DataFrame, column: str) -> dict:
+def anomaly_summary(data: DataLike, column: str) -> dict:
+    data = extract_result_dataframe(data)
     anomaly_col = f"{column}_anomaly"
     if anomaly_col not in data.columns:
         return {
@@ -161,7 +300,7 @@ def anomaly_summary(data: pd.DataFrame, column: str) -> dict:
 
     contamination_col = f"{column}_if_contamination"
     contamination = (
-        data[contamination_col].iloc[0]
+        _to_builtin_scalar(data[contamination_col].iloc[0])
         if contamination_col in data.columns and len(data) > 0
         else None
     )
@@ -177,15 +316,9 @@ def anomaly_summary(data: pd.DataFrame, column: str) -> dict:
         "flagged": flagged,
         "total": total,
         "pct": pct,
-        "score_min": round(float(backbone_scores.min()), 4)
-        if len(backbone_scores)
-        else 0,
-        "score_max": round(float(backbone_scores.max()), 4)
-        if len(backbone_scores)
-        else 0,
-        "score_mean": round(float(backbone_scores.mean()), 4)
-        if len(backbone_scores)
-        else 0,
+        "score_min": round(float(backbone_scores.min()), 4) if len(backbone_scores) else 0,
+        "score_max": round(float(backbone_scores.max()), 4) if len(backbone_scores) else 0,
+        "score_mean": round(float(backbone_scores.mean()), 4) if len(backbone_scores) else 0,
         "selected_transform": selected_transform,
         "threshold": round(threshold, 6) if threshold is not None else None,
         "contamination": contamination,
