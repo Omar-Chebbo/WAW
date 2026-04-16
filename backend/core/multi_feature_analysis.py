@@ -9,7 +9,13 @@ import pandas as pd
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
-from backend.core.anomaly import anomaly_summary, label_anomalies, extract_result_dataframe
+from backend.core.anomaly import (
+    anomaly_summary,
+    label_anomalies,
+    extract_result_dataframe,
+    normalize_selection_fraction,
+    top_count_from_fraction,
+)
 from backend.core.evaluation import edge_fraction, node_fraction, number_components, reachability
 from backend.services.graph_service import graph_to_json, stable_edge_key
 
@@ -43,16 +49,45 @@ def _prepare_multifeature_matrix(
     feature_columns: list[str],
     scaling_mode: str = "none",
 ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
-    raw = df[feature_columns].astype(float).to_numpy()
+    """
+    Build the PA+LP feature matrix.
 
-    if scaling_mode == "zscore":
-        transformed = StandardScaler().fit_transform(raw)
-    elif scaling_mode == "minmax":
-        transformed = MinMaxScaler().fit_transform(raw)
-    elif scaling_mode == "none":
-        transformed = raw.copy()
+    Supported modes:
+      - none/raw: raw PA and raw LP
+      - minmax: min-max scaling per feature
+      - zscore: z-score scaling per feature
+      - log: log1p compression per feature
+      - log_minmax: log1p then min-max per feature
+      - log_zscore: log1p then z-score per feature
+
+    The final backbone selection still uses rank <= top percentage.
+    """
+    raw = df[feature_columns].astype(float).to_numpy()
+    mode = (scaling_mode or "none").strip().lower()
+    if mode == "raw":
+        mode = "none"
+
+    if mode in {"log", "log_minmax", "log_zscore"}:
+        # Use a safe positive shift per feature so signed future scores also work.
+        shifted = raw.copy()
+        for idx in range(shifted.shape[1]):
+            col = shifted[:, idx]
+            min_val = np.nanmin(col)
+            if min_val < 0:
+                col = col - min_val
+            shifted[:, idx] = np.log1p(col)
+        working = shifted
     else:
-        raise ValueError("Unsupported scaling_mode. Use 'none', 'zscore', or 'minmax'.")
+        working = raw.copy()
+
+    if mode in {"none", "log"}:
+        transformed = working
+    elif mode in {"zscore", "log_zscore"}:
+        transformed = StandardScaler().fit_transform(working)
+    elif mode in {"minmax", "log_minmax"}:
+        transformed = MinMaxScaler().fit_transform(working)
+    else:
+        raise ValueError("Unsupported scaling_mode. Use none, minmax, zscore, log, log_minmax, or log_zscore.")
 
     per_feature = {
         column: transformed[:, idx].copy()
@@ -65,43 +100,79 @@ def _prepare_multifeature_matrix(
 def _label_multifeature(
     df: pd.DataFrame,
     feature_columns: list[str],
-    contamination: float | str = "auto",
+    contamination: float | str = 0.10,
     scaling_mode: str = "none",
     output_prefix: str = MULTI_METHOD_ID,
 ) -> pd.DataFrame:
     X, transformed_by_feature = _prepare_multifeature_matrix(df, feature_columns, scaling_mode=scaling_mode)
     num_edges = len(df)
+    selection_fraction = normalize_selection_fraction(contamination)
 
     clf = IsolationForest(
-        contamination=contamination,
+        contamination="auto",
         max_samples=num_edges,
         random_state=42,
     )
     clf.fit(X)
 
-    labels = clf.predict(X)
     score_samples = clf.score_samples(X).reshape(-1)
     decision_scores = clf.decision_function(X).reshape(-1)
-    threshold = float(clf.offset_)
 
-    rank_order = np.argsort(score_samples)
+    rank_order = np.argsort(score_samples, kind="mergesort")
     rank = np.empty_like(rank_order)
     rank[rank_order] = np.arange(1, len(score_samples) + 1)
 
+    selected_count = top_count_from_fraction(num_edges, selection_fraction)
+    labels = np.where(rank <= selected_count, -1, 1)
+    cutoff_score = float(score_samples[rank <= selected_count].max()) if selected_count > 0 else np.nan
+
     labeled = df.copy()
+
+    # A display-only joint score so generic wizard/inspector pages can treat
+    # PA+LP like every other anomaly method. Selection is still based on
+    # pa_lp_if_rank, not on this joint score directly.
+    joint_score = np.linalg.norm(X, axis=1) if X.size else np.array([])
+    labeled[output_prefix] = joint_score
+    labeled[f"{output_prefix}_transformed"] = joint_score
+    labeled[f"{output_prefix}_normalized"] = (
+        MinMaxScaler().fit_transform(joint_score.reshape(-1, 1)).reshape(-1)
+        if len(joint_score) else joint_score
+    )
+
     for column in feature_columns:
         labeled[f"{column}_transformed"] = transformed_by_feature[column]
 
+    labeled[f"{output_prefix}_anomaly_score"] = -score_samples
     labeled[f"{output_prefix}_if_score_samples"] = score_samples
     labeled[f"{output_prefix}_if_decision_function"] = decision_scores
-    labeled[f"{output_prefix}_if_threshold"] = threshold
-    labeled[f"{output_prefix}_if_contamination"] = contamination
+    labeled[f"{output_prefix}_if_threshold"] = np.nan
+    labeled[f"{output_prefix}_if_contamination"] = selection_fraction
+    labeled[f"{output_prefix}_if_selection_fraction"] = selection_fraction
+    labeled[f"{output_prefix}_if_selection_count"] = selected_count
+    labeled[f"{output_prefix}_if_cutoff_rank"] = selected_count
+    labeled[f"{output_prefix}_if_cutoff_score_samples"] = cutoff_score
     labeled[f"{output_prefix}_if_rank"] = rank
     labeled[f"{output_prefix}_anomaly"] = labels
-    labeled[f"{output_prefix}_scaling_mode"] = scaling_mode
+    labeled[f"{output_prefix}_preprocessing"] = scaling_mode or "none"
+    labeled[f"{output_prefix}_scaling_mode"] = scaling_mode or "none"
     labeled["edge_key"] = labeled.apply(_edge_key_from_row, axis=1)
-    return labeled
+    return labeled.sort_values(f"{output_prefix}_if_rank", ascending=True).reset_index(drop=True)
 
+
+
+def label_multifeature_edges(
+    df: pd.DataFrame,
+    contamination: float | str = 0.10,
+    scaling_mode: str = "none",
+) -> pd.DataFrame:
+    """Public helper used by the wizard for PA+LP anomaly ranking."""
+    return _label_multifeature(
+        df.copy(),
+        feature_columns=[PA_COLUMN, LP_COLUMN],
+        contamination=contamination,
+        scaling_mode=scaling_mode,
+        output_prefix=MULTI_METHOD_ID,
+    )
 
 
 def _build_backbone_graph(backbone_df: pd.DataFrame) -> nx.Graph:
@@ -195,8 +266,12 @@ def _run_multifeature_case(
             "total": int(len(labeled)),
             "pct": round(float((labeled[anomaly_col] == -1).mean() * 100), 1) if len(labeled) else 0.0,
             "selected_transform": scaling_mode,
-            "threshold": round(float(labeled[f"{MULTI_METHOD_ID}_if_threshold"].iloc[0]), 6) if len(labeled) else None,
-            "contamination": contamination,
+            "threshold": None,
+            "selection_fraction": normalize_selection_fraction(contamination),
+            "selection_count": int(labeled[f"{MULTI_METHOD_ID}_if_selection_count"].iloc[0]) if len(labeled) else 0,
+            "cutoff_rank": int(labeled[f"{MULTI_METHOD_ID}_if_cutoff_rank"].iloc[0]) if len(labeled) else 0,
+            "cutoff_score_samples": round(float(labeled[f"{MULTI_METHOD_ID}_if_cutoff_score_samples"].iloc[0]), 6) if len(labeled) else None,
+            "contamination": normalize_selection_fraction(contamination),
         },
     )
     return run, labeled
@@ -552,9 +627,12 @@ def run_multi_feature_experiment(
 
     overlap = _common_unique_summary(pa_run, lp_run, multi_run)
 
+    selection_fraction = normalize_selection_fraction(contamination)
+
     return {
         "feature_columns": [PA_COLUMN, LP_COLUMN],
-        "contamination": contamination,
+        "contamination": selection_fraction,
+        "selection_rule": "top_percent_by_isolation_forest_rank",
         "scaling_mode": scaling_mode,
         "original_graph": original_graph_json,
         "cases": {

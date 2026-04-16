@@ -200,4 +200,16 @@ METHOD_REGISTRY = {
         "threshold_direction": None,
         "color":             "#993C1D",
     },
+    "pa_lp": {
+        "label":             "PA + LP (Multi-Feature)",
+        "short":             "PA+LP",
+        "description":       "Uses raw Preferential Attachment and Local Path scores together as a two-feature Isolation Forest input.",
+        "function":          None,
+        "kwargs":            {},
+        "score_column":      "pa_lp",
+        "requires_anomaly":  True,
+        "default_threshold": None,
+        "threshold_direction": None,
+        "color":             "#0F766E",
+    },
 }

@@ -4,11 +4,12 @@ import { Button } from '../components/ui'
 import ResearchAnalysisPanel from '../components/research/ResearchAnalysisPanel'
 import ContaminationExperimentPanel from '../components/research/ContaminationExperimentPanel'
 import MultiFeatureExperimentPanel from '../components/research/MultiFeatureExperimentPanel'
+import IterativeExtractionPanel from '../components/research/IterativeExtractionPanel'
 
 export default function ExperimentLab() {
   const { sessionId, labTab, setLabTab, setView, goToStep } = useWorkflowStore()
 
-  const activeTab = labTab === 'contamination' || labTab === 'multi_feature' ? labTab : 'preprocessing'
+  const activeTab = labTab === 'contamination' || labTab === 'multi_feature' || labTab === 'iterative' ? labTab : 'preprocessing'
 
   return (
     <div className="space-y-6">
@@ -17,7 +18,7 @@ export default function ExperimentLab() {
           <div>
             <h2 className="text-2xl font-bold text-navy">Experiment Lab</h2>
             <p className="text-sm text-gray-500 mt-1">
-              Independent from the wizard. Preprocessing, contamination, and multi-feature studies live here as separate research tracks.
+              Independent from the wizard. Preprocessing, contamination, multi-feature, and iterative extraction studies live here as separate research tracks.
             </p>
             <div className="mt-3 text-xs text-gray-400">
               Session: <span className="font-mono">{sessionId}</span>
@@ -69,11 +70,22 @@ export default function ExperimentLab() {
           >
             Multi-Feature Study
           </button>
+
+          <button
+            onClick={() => setLabTab('iterative')}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+              activeTab === 'iterative'
+                ? 'bg-purple text-white'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            Iterative Extraction
+          </button>
         </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-        {activeTab === 'contamination' ? <ContaminationExperimentPanel /> : activeTab === 'multi_feature' ? <MultiFeatureExperimentPanel /> : <ResearchAnalysisPanel />}
+        {activeTab === 'contamination' ? <ContaminationExperimentPanel /> : activeTab === 'multi_feature' ? <MultiFeatureExperimentPanel /> : activeTab === 'iterative' ? <IterativeExtractionPanel /> : <ResearchAnalysisPanel />}
       </div>
     </div>
   )

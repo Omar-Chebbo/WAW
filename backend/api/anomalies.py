@@ -5,6 +5,7 @@ Endpoints for running and adjusting anomaly labeling (Step 4).
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from backend.utils.json_safe import sanitize_for_json
 from backend.services.anomaly_service import (
     run_anomaly_labeling,
     run_manual_labeling,
@@ -38,7 +39,7 @@ def label(req: LabelRequest):
             req.preprocessing_mode,
             req.contamination,
         )
-        return {"status": "ok", "summary": summary}
+        return sanitize_for_json({"status": "ok", "summary": summary})
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
     except ValueError as e:
@@ -49,7 +50,7 @@ def label(req: LabelRequest):
 def relabel(req: RelabelRequest):
     try:
         summary = run_manual_labeling(req.session_id, req.method_id, req.percentile)
-        return {"status": "ok", "summary": summary}
+        return sanitize_for_json({"status": "ok", "summary": summary})
     except Exception as e:
         raise HTTPException(400, str(e))
 
@@ -58,19 +59,19 @@ def relabel(req: RelabelRequest):
 def get_labeled(session_id: str, method_id: str):
     try:
         df = load_labeled(session_id, method_id)
-        return df.to_dict(orient="records")
+        return sanitize_for_json(df.to_dict(orient="records"))
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
 
 
 @router.get("/{session_id}/{method_id}/distribution")
 def get_distribution(session_id: str, method_id: str):
-    return get_score_distribution(session_id, method_id)
+    return sanitize_for_json(get_score_distribution(session_id, method_id))
 
 
 @router.get("/{session_id}/{method_id}/inspector")
 def get_inspector(session_id: str, method_id: str):
     try:
-        return get_anomaly_inspector(session_id, method_id)
+        return sanitize_for_json(get_anomaly_inspector(session_id, method_id))
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))

@@ -13,11 +13,13 @@ from backend.core.anomaly import (
     anomaly_summary,
     extract_result_dataframe,
     extract_result_backbone,
+    normalize_selection_fraction,
 )
 from backend.core.preprocessing import TRANSFORM_DESCRIPTIONS
 from backend.core.methods import METHOD_REGISTRY
 from backend.config import SESSIONS_DIR
 from backend.services.score_service import load_scores
+from backend.core.multi_feature_analysis import label_multifeature_edges
 
 
 def _stable_edge_key(source: object, target: object) -> str:
@@ -60,29 +62,37 @@ def run_anomaly_labeling(
     contamination: float | None = None,
 ) -> dict:
     """
-    Run anomaly labeling for one method using either:
-    - backend default contamination (auto)
-    - manual contamination
+    Run anomaly labeling for one method.
+
+    New logic:
+    - PA / LP: fit Isolation Forest once, rank edges by score_samples ascending,
+      then keep the top requested percentage.
+    - PA+LP: same ranking rule, but the Isolation Forest input is [PA, LP].
     """
     config = METHOD_REGISTRY[method_id]
     score_col = config["score_column"]
-    transform_id = normalize_preprocessing_mode(preprocessing_mode)
-
-    if contamination is not None:
-        if not (0 < contamination <= 0.5):
-            raise ValueError(
-                "Isolation Forest manual contamination must be in the range (0, 0.5]."
-            )
+    transform_id = normalize_preprocessing_mode(preprocessing_mode) or "raw"
+    selection_fraction = normalize_selection_fraction(contamination)
 
     data = load_scores(session_id, method_id)
-    result = label_anomalies(
-        data,
-        score_col,
-        transform_id=transform_id,
-        contamination=contamination if contamination is not None else "auto",
-    )
-    data = extract_result_dataframe(result)
-    _ = extract_result_backbone(result)
+
+    if method_id == "pa_lp":
+        # For PA+LP, preprocessing_mode is interpreted as feature scaling /
+        # transformation mode over the two feature columns.
+        scaling_mode = "none" if transform_id == "raw" else transform_id
+        data = label_multifeature_edges(
+            data,
+            contamination=selection_fraction,
+            scaling_mode=scaling_mode,
+        )
+    else:
+        result = label_anomalies(
+            data,
+            score_col,
+            transform_id=transform_id,
+            contamination=selection_fraction,
+        )
+        data = extract_result_dataframe(result)
 
     labeled_dir = SESSIONS_DIR / session_id / "labeled"
     labeled_dir.mkdir(parents=True, exist_ok=True)
@@ -94,11 +104,12 @@ def run_anomaly_labeling(
 
 def run_manual_labeling(session_id: str, method_id: str, percentile: float) -> dict:
     """
-    Re-label using a manual percentile threshold on normalized scores.
-    This is kept for lab mode only.
+    Re-label using a manual percentage cut on the Isolation Forest anomaly ranking.
+    `percentile=25` means top 25% most anomalous edges.
     """
     config = METHOD_REGISTRY[method_id]
     score_col = config["score_column"]
+    fraction = float(percentile) / 100.0
 
     labeled_path = SESSIONS_DIR / session_id / "labeled" / f"{method_id}.csv"
 
@@ -107,12 +118,18 @@ def run_manual_labeling(session_id: str, method_id: str, percentile: float) -> d
     else:
         data = load_scores(session_id, method_id)
 
-    if f"{score_col}_normalized" not in data.columns:
-        data = extract_result_dataframe(label_anomalies(data, score_col))
+    if method_id == "pa_lp":
+        if f"{score_col}_if_rank" not in data.columns:
+            data = label_multifeature_edges(data, contamination=fraction, scaling_mode="none")
+        else:
+            from backend.core.anomaly import apply_top_fraction_selection
+            data = apply_top_fraction_selection(data, score_col, fraction)
+    else:
+        if f"{score_col}_normalized" not in data.columns:
+            data = extract_result_dataframe(label_anomalies(data, score_col, contamination=fraction))
+        data = label_anomalies_with_percentile(data, score_col, percentile)
 
-    data = label_anomalies_with_percentile(data, score_col, percentile)
     data.to_csv(labeled_path, index=False)
-
     return anomaly_summary(data, score_col)
 
 
@@ -201,6 +218,10 @@ def build_anomaly_inspector_from_df(data: pd.DataFrame, method_id: str) -> dict:
     rank_col = f"{score_col}_if_rank"
     preprocessing_col = f"{score_col}_preprocessing"
     threshold_col = f"{score_col}_if_threshold"
+    cutoff_rank_col = f"{score_col}_if_cutoff_rank"
+    cutoff_score_col = f"{score_col}_if_cutoff_score_samples"
+    selection_count_col = f"{score_col}_if_selection_count"
+    selection_fraction_col = f"{score_col}_if_selection_fraction"
     contamination_col = f"{score_col}_if_contamination"
 
     anomaly_mask = (
@@ -237,7 +258,23 @@ def build_anomaly_inspector_from_df(data: pd.DataFrame, method_id: str) -> dict:
         "method_id": method_id,
         "score_column": score_col,
         "selected_transform": str(data[preprocessing_col].iloc[0]) if preprocessing_col in data.columns else None,
-        "threshold": float(data[threshold_col].iloc[0]) if threshold_col in data.columns else None,
+        "threshold": None,
+        "cutoff_rank": (
+            int(data[cutoff_rank_col].iloc[0])
+            if cutoff_rank_col in data.columns and len(data) else None
+        ),
+        "cutoff_score_samples": (
+            float(data[cutoff_score_col].iloc[0])
+            if cutoff_score_col in data.columns and len(data) and not pd.isna(data[cutoff_score_col].iloc[0]) else None
+        ),
+        "selection_count": (
+            int(data[selection_count_col].iloc[0])
+            if selection_count_col in data.columns and len(data) else None
+        ),
+        "selection_fraction": (
+            float(data[selection_fraction_col].iloc[0])
+            if selection_fraction_col in data.columns and len(data) else None
+        ),
         "contamination": (
             data[contamination_col].iloc[0].item()
             if contamination_col in data.columns and hasattr(data[contamination_col].iloc[0], 'item')

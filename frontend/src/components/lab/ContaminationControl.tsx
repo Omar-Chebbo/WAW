@@ -32,7 +32,7 @@ export default function ContaminationControl({
   onResetDraft,
 }: Props) {
   const [minValue, setMinValue] = useState(0.01)
-  const [maxValue, setMaxValue] = useState(0.5)
+  const [maxValue, setMaxValue] = useState(1.0)
   const [stepValue, setStepValue] = useState(0.01)
   const [localInput, setLocalInput] = useState(draftValue.toFixed(2))
 
@@ -49,7 +49,7 @@ export default function ContaminationControl({
   }, [minValue, maxValue, safeStep])
 
   const safeMax = useMemo(() => {
-    const capped = Math.min(maxValue, 0.5)
+    const capped = Math.min(maxValue, 1)
     return capped > safeMin ? capped : safeMin + safeStep
   }, [maxValue, safeMin, safeStep])
 
@@ -70,31 +70,28 @@ export default function ContaminationControl({
     setLocalInput(clamped.toFixed(2))
   }
 
-  const appliedLabel =
-    appliedMode === 'auto'
-      ? 'Auto'
-      : (appliedValue ?? draftValue).toFixed(2)
+  const appliedLabel = (appliedValue ?? draftValue).toFixed(2)
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-5 mb-6">
       <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
         <div>
           <div className="text-sm font-semibold text-navy mb-1">
-            Isolation Forest Contamination Control
+Backbone Percentage Control
           </div>
           <p className="text-xs text-gray-500 leading-5 max-w-3xl">
-            <strong>Auto</strong> keeps the backend default. <strong>Manual</strong> lets you choose a valid sklearn contamination value.
+            Choose the percentage of the sorted Isolation Forest anomaly ranking to keep as the backbone.
             Nothing reruns until you press <strong>Apply</strong>.
           </p>
           <p className="text-xs text-amber-700 mt-2">
-            Valid manual contamination range: <strong>(0, 0.5]</strong>.
+            Valid range: <strong>(0, 1]</strong>. Example: <strong>0.25</strong> keeps the top 25% most anomalous edges.
           </p>
         </div>
 
         <div className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">
           <div>
             <span className="font-semibold text-gray-700">Applied mode:</span>{' '}
-            {appliedMode === 'auto' ? 'Auto' : 'Manual'}
+            Manual
           </div>
           <div className="mt-1">
             <span className="font-semibold text-gray-700">Applied value:</span>{' '}
@@ -105,33 +102,9 @@ export default function ContaminationControl({
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">
         <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-          <div className="text-xs font-semibold text-gray-700 mb-3">Mode</div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => onModeChange('auto')}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
-                mode === 'auto'
-                  ? 'bg-navy text-white'
-                  : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-              }`}
-            >
-              Auto
-            </button>
-
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => onModeChange('manual')}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
-                mode === 'manual'
-                  ? 'bg-teal text-white'
-                  : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-              }`}
-            >
-              Manual
-            </button>
+          <div className="text-xs font-semibold text-gray-700 mb-3">Selection rule</div>
+          <div className="text-sm text-gray-600 leading-5">
+            Isolation Forest ranks all edges once. The value below chooses how many top-ranked edges become the backbone.
           </div>
         </div>
 
@@ -140,7 +113,7 @@ export default function ContaminationControl({
           <div className="flex items-center gap-2">
             <input
               type="number"
-              disabled={disabled || mode !== 'manual'}
+              disabled={disabled}
               value={localInput}
               onChange={(e) => setLocalInput(e.target.value)}
               onBlur={commitTextInput}
@@ -151,7 +124,7 @@ export default function ContaminationControl({
             />
             <button
               type="button"
-              disabled={disabled || mode !== 'manual'}
+              disabled={disabled}
               onClick={commitTextInput}
               className="px-3 py-2 text-sm rounded-lg border border-gray-200 bg-white hover:bg-gray-50"
             >
@@ -209,7 +182,7 @@ export default function ContaminationControl({
           step={safeStep}
           value={clamp(draftValue, safeMin, safeMax)}
           onChange={(e) => handleSliderChange(Number(e.target.value))}
-          disabled={disabled || mode !== 'manual'}
+          disabled={disabled}
           className="w-full accent-teal"
         />
 
@@ -228,7 +201,7 @@ export default function ContaminationControl({
             onClick={onApply}
             className="px-4 py-2 rounded-lg bg-teal text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50"
           >
-            {mode === 'auto' ? 'Apply auto' : 'Apply manual value'}
+            Apply backbone percentage
           </button>
 
           <button

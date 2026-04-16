@@ -60,6 +60,10 @@ export interface AnomalySummary {
   score_mean: number
   selected_transform?: string | null
   threshold?: number | null
+  selection_fraction?: number | null
+  selection_count?: number | null
+  cutoff_rank?: number | null
+  cutoff_score_samples?: number | null
   contamination?: number | string | null
   distribution_skewness?: number | null
 }
@@ -102,6 +106,10 @@ export interface AnomalyInspector {
   score_column: string
   selected_transform?: string | null
   threshold?: number | null
+  selection_fraction?: number | null
+  selection_count?: number | null
+  cutoff_rank?: number | null
+  cutoff_score_samples?: number | null
   contamination?: number | string | null
   counts: AnomalySummary
   stats: {
@@ -179,6 +187,7 @@ export type LabTab =
   | 'exports'
   | 'contamination'
   | 'multi_feature'
+  | 'iterative'
 
 export interface SessionState {
   sessionId: string
@@ -405,6 +414,8 @@ export interface ResearchTransformExperiment {
   transformed_stats?: ResearchDistributionStats
   backbone?: ResearchBackboneSummary
   selected_edges?: string[][]
+  selection_fraction?: number
+  selection_rule?: string
   error?: string
 }
 
@@ -420,6 +431,8 @@ export interface ResearchAnalysisResponse {
     auto_decision_reason: string
   }
   preprocessing_recommendation: ResearchDecisionSummary
+  selection_fraction?: number
+  selection_rule?: string
   transformation_metadata: Record<string, { label: string; description: string }>
   transformation_experiments: Record<string, ResearchTransformExperiment>
   algorithmic_notes: {
@@ -436,7 +449,9 @@ export interface ContaminationRunResult {
   contamination_value: number | null
   preprocessing_used: string
   threshold: number | null
-  decision_function_threshold: number
+  cutoff_rank?: number | null
+  cutoff_score_samples?: number | null
+  decision_function_threshold?: number | null
   flagged_edges: number
   edge_fraction: number
   node_fraction: number
@@ -463,4 +478,190 @@ export interface ContaminationExperimentResponse {
   stable_edge_key_format: string
   run_count: number
   runs: ContaminationRunResult[]
+}
+
+
+// ── Iterative extraction lab types ───────────────────────────────
+export type IterativeMethodId = 'pa' | 'lp' | 'pa_lp'
+
+export interface IterativeMetrics {
+  final_edges: number
+  retained_nodes: number
+  edge_fraction: number
+  node_fraction: number
+  reachability: number
+  connected_components: number
+  transitivity: number
+  transitivity_deviation: number
+  avg_clustering: number
+  avg_clustering_deviation: number
+  degree_entropy: number
+  degree_entropy_deviation: number
+  weight_entropy: number
+  weight_entropy_deviation: number
+  avg_path_length: number
+  avg_path_length_deviation: number
+  degree_ks: number
+  weight_ks: number
+  extraction?: string
+  target_percent?: number
+  target_edges?: number
+  stage_count?: number
+}
+
+export interface IterativeStageResult {
+  stage_index: number
+  stage_percent_from_original: number
+  stage_target_edges: number
+  input_table_size: number
+  selected_edges: number
+  cutoff_rank: number
+  cutoff_score_samples: number | null
+  score_stats: Record<string, { min: number | null; max: number | null; mean: number | null; median: number | null }>
+  model_output_histogram?: IterativeFeatureHistogram
+  selected_edge_keys: string[]
+  selected_rows: Record<string, any>[]
+  auto_completion?: boolean
+}
+
+export interface IterativeRegionRow {
+  region: string
+  total_edges: number
+  one_shot_selected: number
+  iterative_selected: number
+  common: number
+  one_shot_only: number
+  iterative_only: number
+  one_shot_pct_of_region: number
+  iterative_pct_of_region: number
+  [stageKey: string]: string | number
+}
+
+export interface IterativeHistogramBin {
+  bin_index: number
+  start: number | null
+  end: number | null
+  all_count: number
+  selected_count: number
+}
+
+export interface IterativeFeatureHistogram {
+  feature: string
+  label: string
+  input_edges: number
+  selected_edges: number
+  selected_share_percent: number
+  min: number | null
+  max: number | null
+  bins: IterativeHistogramBin[]
+}
+
+export interface IterativeHistogramGroup {
+  label: string
+  input_table_size: number
+  selected_edges: number
+  stage_index?: number
+  stage_percent_from_original?: number
+  histograms: IterativeFeatureHistogram[]
+  model_output_histogram?: IterativeFeatureHistogram
+}
+
+export interface IterativeScatterPoint {
+  edge_key: string
+  source: string
+  target: string
+  score?: number | null
+  pa_score?: number | null
+  lp_score?: number | null
+  pa?: number | null
+  lp?: number | null
+  one_shot_rank?: number | null
+  one_shot_score_samples?: number | null
+  one_shot_decision_function?: number | null
+  stage?: number | null
+  stage_rank?: number | null
+  selection_category: 'common' | 'one_shot_only' | 'iterative_only' | 'not_selected' | string
+  region?: string
+  region_3x3?: string
+}
+
+export interface IterativeMethodResult {
+  method_id: IterativeMethodId
+  label: string
+  short: string
+  features: string[]
+  target_percent: number
+  target_edges: number
+  stage_percents: number[]
+  region_config?: { low_percent: number; high_percent: number; middle_percent: number }
+  summary_rows: Record<string, any>[]
+  one_shot: { metrics: IterativeMetrics; selected_edge_keys: string[] }
+  iterative: { metrics: IterativeMetrics; selected_edge_keys: string[] }
+  stages: IterativeStageResult[]
+  overlap: {
+    common: number
+    only_one_shot: number
+    only_iterative: number
+    one_shot_edges: number
+    iterative_edges: number
+    jaccard: number
+    common_sample: string[]
+    only_iterative_sample: string[]
+    only_one_shot_sample: string[]
+  }
+  region_analysis: {
+    region_type: string
+    thresholds: Record<string, any>
+    rows: IterativeRegionRow[]
+    high_tail_domination: Record<string, any>
+  }
+  score_histograms?: {
+    one_shot: IterativeHistogramGroup
+    stages: IterativeHistogramGroup[]
+  }
+  rank_scatter: {
+    mode: string
+    x_axis: string
+    y_axis: string
+    thresholds: Record<string, any>
+    points: IterativeScatterPoint[]
+  }
+  feature_scatter?: {
+    mode: string
+    x_axis: string
+    y_axis: string
+    thresholds: Record<string, any>
+    points: IterativeScatterPoint[]
+  } | null
+  graph_overlay: GraphData
+  edge_inspector: Record<string, any>[]
+  interpretation: string
+}
+
+export interface IterativeCompareAll {
+  entries: Record<string, any>[]
+  jaccard_keys: string[]
+  jaccard_matrix: Record<string, any>[]
+  region_summary: Record<string, any>[]
+  interpretation: string
+}
+
+export interface IterativeExtractionResponse {
+  dataset_id: string
+  dataset_label: string
+  is_custom: boolean
+  score_source: ContaminationScoreSource
+  session_id?: string | null
+  selection_rule: string
+  stage_percent_reference: string
+  region_percent_reference?: string
+  region_config?: { low_percent: number; high_percent: number; middle_percent: number }
+  supported_methods: IterativeMethodId[]
+  target_percent: number
+  stage_percents: number[]
+  original_edges: number
+  original_nodes: number
+  original_graph: GraphData
+  methods: Partial<Record<IterativeMethodId, IterativeMethodResult>>
+  compare_all: IterativeCompareAll
 }

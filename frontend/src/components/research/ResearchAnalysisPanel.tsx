@@ -68,6 +68,7 @@ export default function ResearchAnalysisPanel() {
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ResearchAnalysisResponse | null>(null)
   const [activeTransform, setActiveTransform] = useState<ResearchTransformId>('raw')
+  const [selectionFraction, setSelectionFraction] = useState(0.10)
 
   const methodColor =
     METHOD_OPTIONS.find(m => m.id === methodId)?.color ?? '#3C3489'
@@ -77,7 +78,7 @@ export default function ResearchAnalysisPanel() {
     setError(null)
 
     try {
-      const res = await runResearchAnalysis(networkId, methodId)
+      const res = await runResearchAnalysis(networkId, methodId, selectionFraction)
       setResult(res)
 
       const recommended = res.preprocessing_recommendation.selected_transform as ResearchTransformId
@@ -187,6 +188,51 @@ export default function ResearchAnalysisPanel() {
         </div>
       </div>
 
+      <div className="rounded-2xl border border-gray-100 bg-white p-5 mb-6">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div>
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">
+              Backbone percentage for preprocessing comparison
+            </div>
+            <div className="text-sm text-gray-600 leading-6">
+              This value controls how many top-ranked Isolation Forest edges are kept for each transformation.
+              Example: <strong>0.25</strong> means top 25% of the anomaly ranking.
+            </div>
+          </div>
+
+          <div className="min-w-[280px]">
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min={0.01}
+                max={1}
+                step={0.01}
+                value={selectionFraction}
+                onChange={(e) => setSelectionFraction(Number(e.target.value))}
+                className="w-full accent-teal"
+              />
+              <input
+                type="number"
+                min={0.01}
+                max={1}
+                step={0.01}
+                value={selectionFraction.toFixed(2)}
+                onChange={(e) => {
+                  const value = Number(e.target.value)
+                  if (!Number.isNaN(value)) {
+                    setSelectionFraction(Math.min(1, Math.max(0.01, value)))
+                  }
+                }}
+                className="w-24 rounded-lg border border-gray-200 px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="text-xs text-gray-400 mt-2">
+              Current selection: {(selectionFraction * 100).toFixed(0)}% of edges kept as backbone.
+            </div>
+          </div>
+        </div>
+      </div>
+
       {error && (
         <div className="bg-coral-bg border border-coral/30 rounded-lg px-4 py-3 text-sm text-coral mb-6">
           ❌ {error}
@@ -214,6 +260,7 @@ export default function ResearchAnalysisPanel() {
             <MiniStat label="Method" value={result.method} />
             <MiniStat label="Nodes" value={result.n_nodes} />
             <MiniStat label="Edges" value={result.n_edges} />
+            <MiniStat label="Backbone %" value={`${((result.selection_fraction ?? selectionFraction) * 100).toFixed(0)}%`} />
           </div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">

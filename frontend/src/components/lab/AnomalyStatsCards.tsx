@@ -7,7 +7,7 @@ interface Props {
 }
 
 function formatTransformName(id?: string | null) {
-  if (!id) return 'Auto'
+  if (!id) return 'Default'
   if (id === 'raw') return 'None'
 
   return id
@@ -44,9 +44,9 @@ export default function AnomalyStatsCards({ summary, color }: Props) {
 
       <div className="bg-gray-50 rounded-xl p-4 text-center">
         <div className="text-lg font-bold text-gray-700">
-          {summary.threshold != null ? summary.threshold.toFixed(4) : '—'}
+          {summary.cutoff_rank ?? '—'}
         </div>
-        <div className="text-xs text-gray-500 mt-1">IF threshold</div>
+        <div className="text-xs text-gray-500 mt-1">Cutoff rank</div>
       </div>
 
       <div className="bg-gray-50 rounded-xl p-4 text-center">

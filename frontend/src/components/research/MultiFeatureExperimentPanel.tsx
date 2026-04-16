@@ -22,7 +22,7 @@ interface DatasetOption {
 function clampContamination(value: string) {
   const parsed = Number(value)
   if (Number.isNaN(parsed)) return 0.1
-  return Math.min(0.5, Math.max(0.01, parsed))
+  return Math.min(1.0, Math.max(0.01, parsed))
 }
 
 function quadrantLabel(value: string) {
@@ -579,7 +579,7 @@ export default function MultiFeatureExperimentPanel() {
         <div>
           <h3 className="text-lg font-bold text-navy">Multi-Feature Anomaly Detection Study</h3>
           <p className="text-sm text-gray-500 mt-1 max-w-4xl">
-            Compare PA alone, LP alone, and PA+LP together under the same Isolation Forest contamination setting. This page also shows which extreme edges are kept and how the three backbone graphs differ visually.
+            Compare PA alone, LP alone, and PA+LP together under the same same top-percentage backbone setting. This page also shows which extreme edges are kept and how the three backbone graphs differ visually.
           </p>
         </div>
         <Button onClick={handleRun} loading={loading}>Run study</Button>
@@ -651,7 +651,7 @@ export default function MultiFeatureExperimentPanel() {
         <>
           <div className="grid md:grid-cols-4 gap-4">
             <StatCard label="Dataset" value={result.dataset_label} sub={`${result.original_graph.nodes.length} nodes · ${result.original_graph.links.length} edges`} />
-            <StatCard label="Contamination" value={String(result.contamination)} sub="Same for all three cases" />
+            <StatCard label="Backbone %" value={String(result.contamination)} sub="Top percentage used for all three cases" />
             <StatCard label="Scaling" value={result.scaling_mode} sub="Applied only to PA+LP" />
             <StatCard label="Feature pair" value="PA + LP" sub={result.feature_columns.join(' + ')} />
           </div>

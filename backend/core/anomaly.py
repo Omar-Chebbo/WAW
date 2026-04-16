@@ -1,7 +1,12 @@
 """
 backend/core/anomaly.py
-Pure-function anomaly labeling — no file I/O here.
+Pure-function anomaly ranking and labeling — no file I/O here.
 The service layer handles reading/writing files.
+
+New contamination logic:
+Isolation Forest produces a sorted abnormality ranking. Contamination is the
+percentage of that ranking kept as the backbone. No sklearn threshold/predict
+cutoff is used to choose backbone edges.
 """
 
 from __future__ import annotations
@@ -45,16 +50,16 @@ except Exception:  # pragma: no cover
         return None
 
 
+DEFAULT_SELECTION_FRACTION = 0.10
+
+
 @dataclass
 class AnomalyLabelResult:
     """
     Dual result for anomaly labeling.
 
     - `data` keeps the full labeled DataFrame used by the current app UI/workflow.
-    - `backbone` keeps the new graph-native Backbone object introduced by the refactor.
-
-    The class intentionally forwards common DataFrame operations so older code that still
-    expects a DataFrame continues to work while the new Backbone representation is preserved.
+    - `backbone` keeps the graph-native Backbone object introduced by the refactor.
     """
 
     data: pd.DataFrame
@@ -127,13 +132,45 @@ def extract_result_backbone(result: DataLike) -> Backbone | None:
     return None
 
 
-def _build_backbone_object(data: pd.DataFrame, column: str) -> Backbone | None:
+def normalize_selection_fraction(contamination: float | str | None = None) -> float:
     """
-    Build the graph-native Backbone object that the refactor introduced.
+    Interpret contamination as the fraction of top-ranked anomalous edges kept.
 
-    The labeled DataFrame remains the source of truth for the current UI, while the returned
-    Backbone instance lets the project keep the newer abstraction the doctor wanted.
+    Examples:
+      - 0.10 keeps the top 10% of edges in the anomaly ranking.
+      - 0.25 keeps the top 25%.
+      - None / "auto" are kept for backwards compatibility and map to 0.10.
     """
+    if contamination is None:
+        return DEFAULT_SELECTION_FRACTION
+
+    if isinstance(contamination, str):
+        token = contamination.strip().lower()
+        if token in {"", "auto", "default"}:
+            return DEFAULT_SELECTION_FRACTION
+        try:
+            value = float(token)
+        except ValueError as exc:
+            raise ValueError(
+                f"Unsupported contamination value '{contamination}'. Use a fraction in (0, 1], e.g. 0.25 for top 25%."
+            ) from exc
+    else:
+        value = float(contamination)
+
+    if not (0 < value <= 1):
+        raise ValueError(
+            f"Contamination '{contamination}' is invalid. In the new ranking logic it must be a fraction in (0, 1]."
+        )
+    return value
+
+
+def top_count_from_fraction(total: int, fraction: float) -> int:
+    if total <= 0:
+        return 0
+    return max(1, min(total, int(np.ceil(total * fraction))))
+
+
+def _build_backbone_object(data: pd.DataFrame, column: str) -> Backbone | None:
     graph = nx.from_pandas_edgelist(
         data,
         source="source",
@@ -150,7 +187,6 @@ def _build_backbone_object(data: pd.DataFrame, column: str) -> Backbone | None:
         filter_on="Edges",
     )
 
-    # Best-effort bridge for future code that may want direct access to the labeled table.
     try:
         setattr(backbone, "labeled_data", data.copy())
     except Exception:
@@ -159,29 +195,58 @@ def _build_backbone_object(data: pd.DataFrame, column: str) -> Backbone | None:
     return backbone
 
 
+def apply_top_fraction_selection(data: pd.DataFrame, column: str, contamination: float | str | None = None) -> pd.DataFrame:
+    """
+    Apply the new backbone rule to an already scored/ranked Isolation Forest table.
+
+    The Isolation Forest ranking is the source of truth. Contamination is only
+    the percentage of this sorted ranking retained as the backbone.
+    """
+    rank_col = f"{column}_if_rank"
+    score_col = f"{column}_if_score_samples"
+    anomaly_col = f"{column}_anomaly"
+
+    if rank_col not in data.columns:
+        raise ValueError(f"Missing Isolation Forest rank column: {rank_col}")
+
+    fraction = normalize_selection_fraction(contamination)
+    selected_count = top_count_from_fraction(len(data), fraction)
+
+    labeled = data.copy()
+    selected_mask = labeled[rank_col].astype(float) <= selected_count
+    labeled[anomaly_col] = np.where(selected_mask, -1, 1)
+    labeled[f"{column}_if_contamination"] = fraction
+    labeled[f"{column}_if_selection_fraction"] = fraction
+    labeled[f"{column}_if_selection_count"] = selected_count
+    labeled[f"{column}_if_cutoff_rank"] = selected_count
+
+    if score_col in labeled.columns and selected_count > 0 and selected_mask.any():
+        cutoff_score = float(labeled.loc[selected_mask, score_col].max())
+    else:
+        cutoff_score = np.nan
+    labeled[f"{column}_if_cutoff_score_samples"] = cutoff_score
+
+    # Old column kept only for compatibility. It is no longer used for selection.
+    labeled[f"{column}_if_threshold"] = np.nan
+
+    return labeled.sort_values(rank_col, ascending=True).reset_index(drop=True)
+
+
 def label_anomalies(
     data: pd.DataFrame,
     column: str,
     transform_id: str | None = None,
-    contamination: float | str = "auto",
+    contamination: float | str | None = None,
 ) -> AnomalyLabelResult:
     """
-    Label edges as backbone (anomaly=-1) or normal (1) using Isolation Forest.
+    Rank edges by Isolation Forest abnormality, then keep the top contamination percentage.
 
-    Added columns:
-      {column}_transformed           -> transformed feature sent to the model
-      {column}_normalized            -> min-max version kept for display / manual thresholding
-      {column}_anomaly_score         -> kept for backward compatibility (decision_function)
-      {column}_if_score_samples      -> raw Isolation Forest score scale
-      {column}_if_decision_function  -> shifted score, threshold = 0
-      {column}_if_threshold          -> model threshold on score_samples (clf.offset_)
-      {column}_if_contamination      -> contamination used in this run
-      {column}_if_rank               -> abnormality rank (1 = most abnormal)
-      {column}_anomaly               -> +1 normal, -1 backbone
-      {column}_preprocessing         -> transform name used for this run
-
-    Returns:
-      AnomalyLabelResult(data=<labeled dataframe>, backbone=<Backbone instance>)
+    New project logic:
+      1. Fit Isolation Forest once on the transformed PA/LP score vector.
+      2. Store score_samples for every edge.
+      3. Sort/rank edges by score_samples ascending (rank 1 = most anomalous).
+      4. Interpret contamination as the backbone percentage.
+         Example: contamination=0.25 keeps the top 25% ranked edges.
     """
 
     scores = data[column].to_numpy(dtype=float)
@@ -195,42 +260,35 @@ def label_anomalies(
 
     X = transformed.reshape(-1, 1)
 
+    # Fit once. The model contamination/threshold is not used for backbone selection.
     clf = IsolationForest(
-        contamination=contamination,
+        contamination="auto",
         max_samples=num_edges,
         random_state=42,
     )
     clf.fit(X)
 
-    labels = clf.predict(X)
     score_samples = clf.score_samples(X).reshape(-1)
     decision_scores = clf.decision_function(X).reshape(-1)
-    threshold = float(clf.offset_)
 
-    # Lower score_samples = more abnormal in scikit-learn Isolation Forest
-    rank_order = np.argsort(score_samples)
+    # Lower score_samples = more abnormal in scikit-learn Isolation Forest.
+    rank_order = np.argsort(score_samples, kind="mergesort")
     rank = np.empty_like(rank_order)
     rank[rank_order] = np.arange(1, len(score_samples) + 1)
 
     labeled = data.copy()
     labeled[f"{column}_transformed"] = transformed
     labeled[f"{column}_normalized"] = normalized
-
-    # old column kept so the rest of the project does not break
-    labeled[f"{column}_anomaly_score"] = decision_scores
-
-    # new explicit IF columns
+    labeled[f"{column}_anomaly_score"] = -score_samples  # higher = more anomalous
     labeled[f"{column}_if_score_samples"] = score_samples
     labeled[f"{column}_if_decision_function"] = decision_scores
-    labeled[f"{column}_if_threshold"] = threshold
-    labeled[f"{column}_if_contamination"] = contamination
     labeled[f"{column}_if_rank"] = rank
-
-    labeled[f"{column}_anomaly"] = labels
     labeled[f"{column}_preprocessing"] = selected_transform
     labeled[f"{column}_shape_class"] = decision["shape_class"]
     labeled[f"{column}_distribution_skewness"] = decision["decision_features"]["skewness"]
     labeled[f"{column}_zero_ratio"] = decision["decision_features"]["zero_ratio"]
+
+    labeled = apply_top_fraction_selection(labeled, column, contamination)
 
     backbone = _build_backbone_object(labeled, column)
     return AnomalyLabelResult(data=labeled, backbone=backbone)
@@ -240,20 +298,20 @@ def label_anomalies_with_percentile(
     data: DataLike, column: str, percentile: float
 ) -> pd.DataFrame:
     """
-    Label edges using a manual percentile threshold instead of IsolationForest.
-    Edges with normalized score >= percentile threshold are flagged as backbone (-1).
+    Backward-compatible relabel endpoint.
+
+    `percentile` is now interpreted as the percentage of the anomaly ranking to
+    keep, not as a threshold on normalized raw scores.
+    Example: percentile=25 keeps the top 25% most anomalous edges.
     """
     data = extract_result_dataframe(data)
-    norm_col = f"{column}_normalized"
+    rank_col = f"{column}_if_rank"
 
-    if norm_col not in data.columns:
-        data = extract_result_dataframe(label_anomalies(data, column))
+    fraction = float(percentile) / 100.0
+    if rank_col not in data.columns:
+        data = extract_result_dataframe(label_anomalies(data, column, contamination=fraction))
 
-    cutoff = np.percentile(data[norm_col].values, percentile)
-
-    data = data.copy()
-    data[f"{column}_anomaly"] = np.where(data[norm_col] >= cutoff, -1, 1)
-    return data
+    return apply_top_fraction_selection(data, column, fraction)
 
 
 def anomaly_summary(data: DataLike, column: str) -> dict:
@@ -269,6 +327,10 @@ def anomaly_summary(data: DataLike, column: str) -> dict:
             "score_mean": 0,
             "selected_transform": None,
             "threshold": None,
+            "selection_fraction": None,
+            "selection_count": None,
+            "cutoff_rank": None,
+            "cutoff_score_samples": None,
             "contamination": None,
             "distribution_skewness": None,
         }
@@ -291,12 +353,40 @@ def anomaly_summary(data: DataLike, column: str) -> dict:
         else None
     )
 
+    threshold = None
     threshold_col = f"{column}_if_threshold"
-    threshold = (
-        float(data[threshold_col].iloc[0])
-        if threshold_col in data.columns and len(data) > 0
+    if threshold_col in data.columns and len(data) > 0:
+        raw_threshold = data[threshold_col].iloc[0]
+        if not pd.isna(raw_threshold):
+            threshold = float(raw_threshold)
+
+    selection_fraction_col = f"{column}_if_selection_fraction"
+    selection_fraction = (
+        _to_builtin_scalar(data[selection_fraction_col].iloc[0])
+        if selection_fraction_col in data.columns and len(data) > 0
         else None
     )
+
+    selection_count_col = f"{column}_if_selection_count"
+    selection_count = (
+        _to_builtin_scalar(data[selection_count_col].iloc[0])
+        if selection_count_col in data.columns and len(data) > 0
+        else None
+    )
+
+    cutoff_rank_col = f"{column}_if_cutoff_rank"
+    cutoff_rank = (
+        _to_builtin_scalar(data[cutoff_rank_col].iloc[0])
+        if cutoff_rank_col in data.columns and len(data) > 0
+        else None
+    )
+
+    cutoff_score_col = f"{column}_if_cutoff_score_samples"
+    cutoff_score_samples = None
+    if cutoff_score_col in data.columns and len(data) > 0:
+        raw_cutoff = data[cutoff_score_col].iloc[0]
+        if not pd.isna(raw_cutoff):
+            cutoff_score_samples = float(raw_cutoff)
 
     contamination_col = f"{column}_if_contamination"
     contamination = (
@@ -321,6 +411,10 @@ def anomaly_summary(data: DataLike, column: str) -> dict:
         "score_mean": round(float(backbone_scores.mean()), 4) if len(backbone_scores) else 0,
         "selected_transform": selected_transform,
         "threshold": round(threshold, 6) if threshold is not None else None,
+        "selection_fraction": selection_fraction,
+        "selection_count": selection_count,
+        "cutoff_rank": cutoff_rank,
+        "cutoff_score_samples": round(cutoff_score_samples, 6) if cutoff_score_samples is not None else None,
         "contamination": contamination,
         "distribution_skewness": round(distribution_skewness, 6)
         if distribution_skewness is not None

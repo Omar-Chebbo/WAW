@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
+from backend.utils.json_safe import sanitize_for_json
 from backend.services.evaluation_service import (
     run_evaluation,
     load_evaluation,
@@ -29,11 +30,10 @@ class EvalRequest(BaseModel):
 
 @router.get("/metrics")
 def list_metrics():
-    """Return the list of available metrics so the frontend can build the checklist."""
-    return [
+    return sanitize_for_json([
         {"id": mid, "label": entry["label"]}
         for mid, entry in METRIC_REGISTRY.items()
-    ]
+    ])
 
 
 @router.post("/run")
@@ -50,7 +50,7 @@ def run(req: EvalRequest):
         report = run_evaluation(
             req.session_id, dataset_path, req.method_ids, req.metric_ids
         )
-        return report
+        return sanitize_for_json(report)
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -58,7 +58,7 @@ def run(req: EvalRequest):
 @router.get("/{session_id}")
 def get_evaluation(session_id: str):
     try:
-        return load_evaluation(session_id)
+        return sanitize_for_json(load_evaluation(session_id))
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
 
@@ -74,17 +74,14 @@ def export_csv(session_id: str):
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
 
+
 @router.get("/{session_id}/distributions")
 def get_distributions(
     session_id: str,
     dataset_id: str,
-    method_ids: str,      # comma-separated: "pa,lp,hss"
+    method_ids: str,
     is_custom: bool = False,
 ):
-    """
-    Return degree and weight distribution data for original vs each backbone method.
-    Used by the frontend to plot Figures 4 & 5 from the paper, with KS statistics.
-    """
     method_list = [m.strip() for m in method_ids.split(",") if m.strip()]
 
     if is_custom:
@@ -96,6 +93,6 @@ def get_distributions(
         raise HTTPException(404, "Dataset not found")
 
     try:
-        return run_distributions(session_id, dataset_path, method_list)
+        return sanitize_for_json(run_distributions(session_id, dataset_path, method_list))
     except Exception as e:
         raise HTTPException(500, str(e))

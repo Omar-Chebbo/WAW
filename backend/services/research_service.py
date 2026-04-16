@@ -14,6 +14,8 @@ from backend.config import RAW_DIR, SESSIONS_DIR
 from backend.core.contamination_analysis import run_contamination_experiment
 from backend.core.methods import METHOD_REGISTRY
 from backend.core.multi_feature_analysis import run_multi_feature_experiment
+from backend.core.iterative_extraction_analysis import run_iterative_extraction_experiment
+from backend.core.anomaly import normalize_selection_fraction
 from backend.core.research_analysis import run_research_analysis
 from backend.services.graph_service import graph_to_json, load_graph
 from backend.services.score_service import load_scores
@@ -100,6 +102,12 @@ def build_combined_scored_dataframe(
     if score_source == "session_scores":
         if not session_id:
             raise ValueError("session_id is required when score_source='session_scores'.")
+        try:
+            combined_df = load_scores(session_id, "pa_lp")
+            if PA_COLUMN in combined_df.columns and LP_COLUMN in combined_df.columns:
+                return combined_df, "session_scores"
+        except FileNotFoundError:
+            pass
         pa_df = load_scores(session_id, "pa")
         lp_df = load_scores(session_id, "lp")
         resolved_source = "session_scores"
@@ -127,7 +135,7 @@ def build_combined_scored_dataframe(
 
 
 
-def run_benchmark_research(network_id: str, method_id: str) -> dict:
+def run_benchmark_research(network_id: str, method_id: str, contamination: float | str | None = None) -> dict:
     dataset_path, network_label = _resolve_benchmark_path(network_id)
     G = load_graph(dataset_path)
 
@@ -143,6 +151,7 @@ def run_benchmark_research(network_id: str, method_id: str) -> dict:
         method_id=method_id,
         score_column=score_column,
         network_label=network_label,
+        contamination=contamination,
     )
 
 
@@ -158,12 +167,19 @@ def run_contamination_study(
 ) -> dict:
     dataset_path, dataset_label = resolve_dataset_path(dataset_id, is_custom=is_custom)
     original_graph = load_graph(dataset_path)
-    scored_df, resolved_source = build_scored_dataframe(
-        dataset_path=dataset_path,
-        method_id=method_id,
-        score_source=score_source,
-        session_id=session_id,
-    )
+    if method_id == "pa_lp":
+        scored_df, resolved_source = build_combined_scored_dataframe(
+            dataset_path=dataset_path,
+            score_source=score_source,
+            session_id=session_id,
+        )
+    else:
+        scored_df, resolved_source = build_scored_dataframe(
+            dataset_path=dataset_path,
+            method_id=method_id,
+            score_source=score_source,
+            session_id=session_id,
+        )
 
     result = run_contamination_experiment(
         original_graph=original_graph,
@@ -205,12 +221,51 @@ def run_multi_feature_study(
         session_id=session_id,
     )
 
-    effective_contamination: float | str = contamination if contamination is not None else "auto"
+    effective_contamination: float = normalize_selection_fraction(contamination)
     result = run_multi_feature_experiment(
         original_graph=original_graph,
         scored_df=scored_df,
         contamination=effective_contamination,
         scaling_mode=scaling_mode,
+    )
+
+    return {
+        "dataset_id": dataset_id,
+        "dataset_label": dataset_label,
+        "is_custom": is_custom,
+        "score_source": resolved_source,
+        "session_id": session_id,
+        **result,
+    }
+
+
+def run_iterative_extraction_study(
+    dataset_id: str,
+    method_ids: list[str],
+    target_percent: float,
+    stage_percents: list[float],
+    low_region_percent: float = 10.0,
+    high_region_percent: float = 10.0,
+    score_source: str = "compute_fresh",
+    session_id: str | None = None,
+    is_custom: bool = False,
+) -> dict:
+    dataset_path, dataset_label = resolve_dataset_path(dataset_id, is_custom=is_custom)
+    original_graph = load_graph(dataset_path)
+    scored_df, resolved_source = build_combined_scored_dataframe(
+        dataset_path=dataset_path,
+        score_source=score_source,
+        session_id=session_id,
+    )
+
+    result = run_iterative_extraction_experiment(
+        original_graph=original_graph,
+        scored_df=scored_df,
+        methods=method_ids,
+        target_percent=target_percent,
+        stage_percents=stage_percents,
+        low_region_percent=low_region_percent,
+        high_region_percent=high_region_percent,
     )
 
     return {

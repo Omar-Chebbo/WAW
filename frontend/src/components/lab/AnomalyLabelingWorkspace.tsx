@@ -90,7 +90,7 @@ export default function AnomalyLabelingWorkspace({
   }, [relevantMethods, activeTab])
 
   function getControl(methodId: string): MethodControlState {
-    return controls[methodId] ?? { mode: 'auto', draftValue: 0.1 }
+    return controls[methodId] ?? { mode: 'manual', draftValue: 0.1 }
   }
 
   function updateControl(methodId: string, patch: Partial<MethodControlState>) {
@@ -108,13 +108,12 @@ export default function AnomalyLabelingWorkspace({
       setLoading((state) => ({ ...state, [methodId]: true }))
 
       try {
-        const selectedPreprocessing = preprocessingByMethod[methodId]
-        if (!selectedPreprocessing) return
+        const selectedPreprocessing = preprocessingByMethod[methodId] ?? 'none'
+        // PA+LP has no separate preprocessing card in the wizard; it uses raw PA and LP scores by default.
 
         const control = getControl(methodId)
         const finalMode = requestedMode ?? control.mode
-        const contamination =
-          finalMode === 'manual' ? control.draftValue : undefined
+        const contamination = control.draftValue
 
         const currentSummary = summaries[methodId]
         const currentApplied = appliedStates[methodId]
@@ -123,12 +122,10 @@ export default function AnomalyLabelingWorkspace({
           setPreviousRuns((prev) => ({
             ...prev,
             [methodId]: {
-              mode: currentApplied?.mode ?? 'auto',
+              mode: currentApplied?.mode ?? 'manual',
               contaminationLabel:
-                currentApplied?.mode === 'manual'
-                  ? (currentApplied.contamination ?? control.draftValue).toFixed(2)
-                  : 'Auto',
-              threshold: currentSummary?.threshold ?? null,
+                (currentApplied?.contamination ?? control.draftValue).toFixed(2),
+              threshold: currentSummary?.cutoff_rank ?? null,
               flagged: currentSummary?.flagged,
             },
           }))
@@ -153,7 +150,7 @@ export default function AnomalyLabelingWorkspace({
           ...state,
           [methodId]: {
             mode: finalMode,
-            contamination: finalMode === 'manual' ? control.draftValue : null,
+            contamination: control.draftValue,
           },
         }))
         setAnomalyReady(methodId, true)
@@ -228,9 +225,9 @@ export default function AnomalyLabelingWorkspace({
         const inspector = inspectors[method.id]
         const rows = rowsByMethod[method.id] ?? []
         const isLoading = loading[method.id]
-        const selectedPreprocessing = preprocessingByMethod[method.id]
+        const selectedPreprocessing = preprocessingByMethod[method.id] ?? 'none'
         const control = getControl(method.id)
-        const applied = appliedStates[method.id] ?? { mode: 'auto' as ControlMode, contamination: null }
+        const applied = appliedStates[method.id] ?? { mode: 'manual' as ControlMode, contamination: 0.1 }
 
         return (
           <div key={method.id}>
@@ -275,7 +272,7 @@ export default function AnomalyLabelingWorkspace({
                 onModeChange={(newMode) => updateControl(method.id, { mode: newMode })}
                 onDraftChange={(newValue) => updateControl(method.id, { draftValue: newValue })}
                 onApply={() => applyIsolationForestRun(method.id)}
-                onResetDraft={() => updateControl(method.id, { mode: 'auto', draftValue: 0.1 })}
+                onResetDraft={() => updateControl(method.id, { mode: 'manual', draftValue: 0.1 })}
               />
             )}
 

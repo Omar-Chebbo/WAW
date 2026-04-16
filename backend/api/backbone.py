@@ -5,6 +5,7 @@ Endpoints for backbone extraction (Step 5).
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from backend.utils.json_safe import sanitize_for_json
 from backend.services.backbone_service import extract_backbone, load_backbone_json
 
 router = APIRouter()
@@ -26,12 +27,12 @@ def extract(req: ExtractRequest):
             raise HTTPException(404, str(e))
         except Exception as e:
             raise HTTPException(500, str(e))
-    return results
+    return sanitize_for_json(results)
 
 
 @router.get("/{session_id}/{method_id}")
 def get_backbone(session_id: str, method_id: str):
     try:
-        return load_backbone_json(session_id, method_id)
+        return sanitize_for_json(load_backbone_json(session_id, method_id))
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))

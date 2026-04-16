@@ -22,6 +22,8 @@ import type {
   ContaminationScoreSource,
   MultiFeatureExperimentResponse,
   MultiFeatureScalingMode,
+  IterativeExtractionResponse,
+  IterativeMethodId,
 } from '../types'
 
 const api = axios.create({ baseURL: '/api' })
@@ -183,9 +185,34 @@ export const runMultiFeatureExperiment = (params: {
 // ── Research analysis ─────────────────────────────────────────────
 export const runResearchAnalysis = (
   networkId: ResearchNetworkId,
-  methodId: MethodId
+  methodId: MethodId,
+  contamination?: number
 ) =>
   api.post<ResearchAnalysisResponse>('/research/run', {
     network_id: networkId,
     method_id: methodId,
+    contamination: contamination ?? null,
+  }).then(r => r.data)
+
+export const runIterativeExtractionExperiment = (params: {
+  datasetId: string
+  methodIds: IterativeMethodId[]
+  targetPercent: number
+  stagePercents: number[]
+  lowRegionPercent?: number
+  highRegionPercent?: number
+  scoreSource?: ContaminationScoreSource
+  sessionId?: string | null
+  isCustom?: boolean
+}) =>
+  api.post<IterativeExtractionResponse>('/research/iterative-extraction', {
+    dataset_id: params.datasetId,
+    method_ids: params.methodIds,
+    target_percent: params.targetPercent,
+    stage_percents: params.stagePercents,
+    low_region_percent: params.lowRegionPercent ?? 10,
+    high_region_percent: params.highRegionPercent ?? 10,
+    score_source: params.scoreSource ?? 'compute_fresh',
+    session_id: params.sessionId ?? null,
+    is_custom: params.isCustom ?? false,
   }).then(r => r.data)

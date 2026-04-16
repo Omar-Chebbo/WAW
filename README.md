@@ -92,7 +92,7 @@ app/
 | 1 | **Data Selection** — pick a pre-loaded network or upload your own CSV |
 | 2 | **Method Selection** — choose HSS, DF, PA, LP (or all) |
 | 3 | **Score Computation** — real-time progress bars via WebSocket |
-| 4 | **Anomaly Labeling** — Isolation Forest with adjustable threshold slider |
+| 4 | **Anomaly Labeling** — Isolation Forest ranking with adjustable backbone percentage slider |
 | 5 | **Backbone Extraction** — node/edge retention statistics |
 | 6 | **Visual Comparison** — interactive D3 graphs, side-by-side or overlay |
 | 7 | **Evaluation** — metrics table + radar chart, CSV export |
@@ -123,3 +123,16 @@ app/
 | `job_mobility_network_09_10.csv` | Job mobility flows |
 | `toth-elementary-school.csv` | School contact network |
 | `lesmis.csv` | Les Misérables character co-occurrence |
+
+
+## Updated contamination / backbone-percentage logic
+
+In this version, contamination is interpreted as the percentage of edges to keep in the backbone.
+For PA, LP, and PA+LP anomaly-based methods, the app now:
+
+1. computes the PA/LP/PA+LP feature vector for every observed edge,
+2. fits Isolation Forest once to obtain an anomaly ranking,
+3. sorts edges from most anomalous to least anomalous,
+4. keeps the top `contamination × |E|` edges as the backbone.
+
+Example: `0.25` keeps approximately the top 25% most anomalous edges. The old Isolation Forest threshold / `predict()` cutoff is no longer used to choose backbone edges.

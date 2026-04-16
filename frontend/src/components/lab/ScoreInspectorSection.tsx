@@ -212,10 +212,7 @@ export default function ScoreInspectorSection({
       .slice(0, 20)
   }, [rows, rankKey])
 
-    const previousModeLabel =
-    previousRun?.mode === 'manual'
-      ? 'Manual'
-      : 'Auto'
+    const previousModeLabel = 'Top-percentage cut'
 
   return (
     <div className="space-y-6 mb-6">
@@ -263,8 +260,8 @@ export default function ScoreInspectorSection({
                 {previousRun.contaminationLabel}
               </div>
               <div>
-                <span className="font-semibold text-amber-900">Previous threshold:</span>{' '}
-                {previousRun.threshold != null ? previousRun.threshold.toFixed(4) : '—'}
+                <span className="font-semibold text-amber-900">Previous cutoff rank:</span>{' '}
+                {previousRun.threshold ?? '—'}
               </div>
               <div>
                 <span className="font-semibold text-amber-900">Previous backbone edges:</span>{' '}
@@ -272,8 +269,7 @@ export default function ScoreInspectorSection({
               </div>
             </div>
             <div className="mt-3 text-xs text-amber-800">
-              The chart below uses <strong>score_samples</strong> for the ranked abnormality plot, so the plotted cutoff line is the real
-              Isolation Forest threshold <strong>offset_</strong>. On the <strong>decision_function</strong> scale, the cutoff is always <strong>0</strong>.
+              The ranking is sorted from most anomalous to least anomalous. Changing contamination only changes how many top-ranked edges are kept.
             </div>
           </div>
         )}
@@ -317,7 +313,7 @@ export default function ScoreInspectorSection({
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
           <div className="bg-white rounded-2xl border border-gray-100 p-4">
             <div className="text-sm font-semibold text-navy mb-3">
-              Scatter: raw score vs decision function
+              Scatter: raw score vs sklearn decision score
             </div>
             <ResponsiveContainer width="100%" height={280}>
               <ScatterChart margin={{ top: 10, right: 10, left: 0, bottom: 12 }}>
@@ -338,7 +334,6 @@ export default function ScoreInspectorSection({
                 />
                 <Tooltip cursor={{ strokeDasharray: '3 3' }} />
                 <Legend />
-                <ReferenceLine y={0} stroke="#111827" strokeDasharray="4 4" label="decision cutoff = 0" />
                 <Scatter name="Normal" data={scatterDecisionNormal} fill="#d1d5db" />
                 <Scatter name="Anomaly" data={scatterDecisionAnomaly} fill={methodColor} />
               </ScatterChart>
@@ -368,14 +363,6 @@ export default function ScoreInspectorSection({
                 />
                 <Tooltip cursor={{ strokeDasharray: '3 3' }} />
                 <Legend />
-                {inspector.threshold != null && (
-                  <ReferenceLine
-                    y={inspector.threshold}
-                    stroke="#111827"
-                    strokeDasharray="4 4"
-                    label="score_samples cutoff"
-                  />
-                )}
                 <Scatter name="Normal" data={scatterSamplesNormal} fill="#d1d5db" />
                 <Scatter name="Anomaly" data={scatterSamplesAnomaly} fill={methodColor} />
               </ScatterChart>
@@ -399,14 +386,6 @@ export default function ScoreInspectorSection({
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
                 <Legend />
-                {inspector.threshold != null && (
-                  <ReferenceLine
-                    y={inspector.threshold}
-                    stroke="#111827"
-                    strokeDasharray="4 4"
-                    label="score_samples cutoff"
-                  />
-                )}
                 <Line
                   type="monotone"
                   dataKey="scoreSamples"
@@ -421,27 +400,25 @@ export default function ScoreInspectorSection({
 
           <div className="bg-white rounded-2xl border border-gray-100 p-4">
             <div className="text-sm font-semibold text-navy mb-3">
-              Threshold explanation
+              Top-percentage selection rule
             </div>
             <div className="space-y-3 text-sm text-gray-700">
               <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                <div className="font-semibold text-navy">score_samples cutoff</div>
+                <div className="font-semibold text-navy">Cutoff rank</div>
                 <div className="mt-1">
-                  {inspector.threshold != null ? inspector.threshold.toFixed(6) : '—'}
+                  {inspector.cutoff_rank ?? inspector.counts.cutoff_rank ?? '—'}
                 </div>
               </div>
 
               <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                <div className="font-semibold text-navy">decision_function cutoff</div>
-                <div className="mt-1">0.000000</div>
+                <div className="font-semibold text-navy">Selected percentage</div>
+                <div className="mt-1">
+                  {inspector.selection_fraction != null ? `${(inspector.selection_fraction * 100).toFixed(1)}%` : inspector.counts.selection_fraction != null ? `${(inspector.counts.selection_fraction * 100).toFixed(1)}%` : '—'}
+                </div>
               </div>
 
               <div className="text-xs text-gray-500 leading-5">
-                In scikit-learn Isolation Forest, anomalies are easier to read in two score spaces:
-                <br />
-                <strong>score_samples</strong>: the model uses the threshold <strong>offset_</strong>.
-                <br />
-                <strong>decision_function</strong>: the anomaly cutoff is always <strong>0</strong>.
+                Isolation Forest ranks edges by abnormality using <strong>score_samples</strong> where lower values are more anomalous. The backbone is selected by taking the requested top percentage from this ranking.
               </div>
             </div>
           </div>
@@ -466,7 +443,7 @@ export default function ScoreInspectorSection({
                   <th className="py-2 pr-4">Raw</th>
                   <th className="py-2 pr-4">Transformed</th>
                   <th className="py-2 pr-4">score_samples</th>
-                  <th className="py-2 pr-4">decision</th>
+                  <th className="py-2 pr-4">IF score</th>
                   <th className="py-2 pr-4">Label</th>
                 </tr>
               </thead>

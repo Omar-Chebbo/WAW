@@ -30,7 +30,7 @@ import { Button } from '../ui'
 import ScoreInspectorSection from '../lab/ScoreInspectorSection'
 import ContaminationGraphDiffPanel from './ContaminationGraphDiffPanel'
 
-const METHOD_OPTIONS = METHODS.filter((method) => ['pa', 'lp'].includes(method.id))
+const METHOD_OPTIONS = METHODS.filter((method) => ['pa', 'lp', 'pa_lp'].includes(method.id))
 
 const PREPROCESSING_OPTIONS: { id: PreprocessingMode; label: string }[] = [
   { id: 'none', label: 'Raw scores (default)' },
@@ -44,7 +44,7 @@ const SCORE_SOURCE_OPTIONS: { id: ContaminationScoreSource; label: string; descr
   {
     id: 'compute_fresh',
     label: 'Compute fresh from dataset',
-    description: 'Independent from the wizard. Recomputes the selected PA/LP score directly from the dataset.',
+    description: 'Independent from the wizard. Recomputes the selected PA/LP or PA+LP score directly from the dataset.',
   },
   {
     id: 'session_scores',
@@ -53,7 +53,7 @@ const SCORE_SOURCE_OPTIONS: { id: ContaminationScoreSource; label: string; descr
   },
 ]
 
-const DEFAULT_CONTAMINATION_LIST = ['Auto', '0.05', '0.10', '0.15', '0.20', '0.30', '0.40', '0.50']
+const DEFAULT_CONTAMINATION_LIST = ['0.05', '0.10', '0.15', '0.20', '0.25', '0.30', '0.40', '0.50', '0.75', '1.00']
 const ORIGINAL_BASELINE_VALUE = '__original__'
 const ORIGINAL_BASELINE_LABEL = 'Original graph'
 
@@ -74,9 +74,8 @@ function formatNumber(value: number, digits = 4) {
 function normalizeToken(token: string) {
   const trimmed = token.trim()
   if (!trimmed) return null
-  if (trimmed.toLowerCase() === 'auto') return 'Auto'
   const numeric = Number(trimmed)
-  if (Number.isNaN(numeric) || !(numeric > 0 && numeric <= 0.5)) return null
+  if (Number.isNaN(numeric) || !(numeric > 0 && numeric <= 1)) return null
   return numeric.toFixed(2)
 }
 
@@ -161,15 +160,15 @@ export default function ContaminationExperimentPanel() {
 
   const [draftValue, setDraftValue] = useState('0.10')
   const [minValue, setMinValue] = useState('0.05')
-  const [maxValue, setMaxValue] = useState('0.50')
+  const [maxValue, setMaxValue] = useState('1.00')
   const [stepValue, setStepValue] = useState('0.05')
   const [contaminationList, setContaminationList] = useState<string[]>(DEFAULT_CONTAMINATION_LIST)
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedExperimentIndex, setSelectedExperimentIndex] = useState<number>(0)
-  const [baselineLabel, setBaselineLabel] = useState<string>('Auto')
-  const [selectedRunLabel, setSelectedRunLabel] = useState<string>('Auto')
+  const [baselineLabel, setBaselineLabel] = useState<string>('0.05')
+  const [selectedRunLabel, setSelectedRunLabel] = useState<string>('0.05')
 
   useEffect(() => {
     if (!datasetSelection && datasetOptions[0]) {
@@ -190,7 +189,7 @@ export default function ContaminationExperimentPanel() {
 
   const safeMax = useMemo(() => {
     const parsed = Number(maxValue)
-    const capped = parsed > 0 ? Math.min(parsed, 0.5) : 0.5
+    const capped = parsed > 0 ? Math.min(parsed, 1) : 1
     return capped > safeMin ? capped : safeMin
   }, [maxValue, safeMin])
 
@@ -215,8 +214,7 @@ export default function ContaminationExperimentPanel() {
 
   useEffect(() => {
     if (!selectedExperiment) return
-    const autoRun = selectedExperiment.runs.find((run) => run.contamination_label.toLowerCase() === 'auto')
-    const defaultBaseline = autoRun?.contamination_label ?? selectedExperiment.runs[0]?.contamination_label ?? 'Auto'
+    const defaultBaseline = selectedExperiment.runs[0]?.contamination_label ?? '0.05'
     setBaselineLabel(defaultBaseline)
     setSelectedRunLabel(defaultBaseline)
   }, [selectedExperiment])
@@ -239,7 +237,7 @@ export default function ContaminationExperimentPanel() {
     if (!selectedExperiment) return []
     return selectedExperiment.runs.map((run) => ({
       contamination: run.contamination_label,
-      threshold: run.threshold,
+      cutoff_rank: run.cutoff_rank,
       flagged_edges: run.flagged_edges,
       edge_fraction: run.edge_fraction,
       node_fraction: run.node_fraction,
@@ -273,26 +271,17 @@ export default function ContaminationExperimentPanel() {
     setDraftValue(clamped.toFixed(2))
   }
 
-  function addAuto() {
-    setContaminationList((current) => {
-      if (current.some((item) => item.toLowerCase() === 'auto')) return current
-      return ['Auto', ...current]
-    })
-  }
-
   function addManualValue() {
     commitDraft()
     const token = normalizeToken(draftValue)
     if (!token) {
-      setError('Manual contamination must be a number in the range (0, 0.5].')
+      setError('Backbone percentage must be a number in the range (0, 1].')
       return
     }
     setError(null)
     setContaminationList((current) => {
       if (current.includes(token)) return current
       return [...current, token].sort((left, right) => {
-        if (left === 'Auto') return -1
-        if (right === 'Auto') return 1
         return Number(left) - Number(right)
       })
     })
@@ -305,10 +294,7 @@ export default function ContaminationExperimentPanel() {
       values.push(current.toFixed(2))
       current += safeStep
     }
-    setContaminationList((existing) => {
-      const hasAuto = existing.some((item) => item.toLowerCase() === 'auto')
-      return hasAuto ? ['Auto', ...values] : values
-    })
+    setContaminationList(values)
   }
 
   function removeToken(token: string) {
@@ -326,7 +312,7 @@ export default function ContaminationExperimentPanel() {
       .filter((item): item is string => Boolean(item))
 
     if (normalized.length === 0) {
-      setError('Add at least one contamination value before running the experiment.')
+      setError('Add at least one backbone percentage value before running the experiment.')
       return
     }
 
@@ -364,7 +350,7 @@ export default function ContaminationExperimentPanel() {
       node_fraction: run.node_fraction,
       reachability: run.reachability,
       connected_components: run.connected_components,
-      threshold: run.threshold ?? 0,
+      cutoff_rank: run.cutoff_rank ?? 0,
       jaccard_vs_baseline: jaccard(baselineEdgeKeys, run.selected_edge_keys),
     }))
   }, [selectedExperiment, baselineEdgeKeys])
@@ -379,7 +365,7 @@ export default function ContaminationExperimentPanel() {
         <div>
           <h3 className="text-lg font-bold text-navy">Contamination Comparison Lab</h3>
           <p className="text-sm text-gray-500 mt-1 max-w-4xl">
-            Dedicated contamination study for PA and LP. This is separate from the preprocessing study and uses raw scores as the default baseline.
+            Dedicated contamination study for PA, LP, and PA+LP. This is separate from the preprocessing study and uses raw scores as the default baseline.
             Nothing reruns while you adjust controls. You build a contamination list deliberately, then run the full experiment in one shot.
           </p>
         </div>
@@ -392,7 +378,7 @@ export default function ContaminationExperimentPanel() {
       <div className="rounded-2xl border border-blue-100 bg-blue-50 p-5">
         <div className="text-sm font-semibold text-blue-900 mb-1">Research direction locked in</div>
         <p className="text-sm text-blue-800 leading-6">
-          This page keeps the contamination study separate from preprocessing. Raw PA/LP scores stay the safer default, while contamination is the variable being compared across runs.
+          This page keeps the contamination study separate from preprocessing. Raw PA/LP or PA+LP scores stay the safer default, while contamination is the variable being compared across runs.
         </p>
       </div>
 
@@ -475,9 +461,9 @@ export default function ContaminationExperimentPanel() {
 
         <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm space-y-5">
           <div>
-            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Contamination list builder</div>
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Backbone percentage list builder</div>
             <p className="text-sm text-gray-500 leading-6">
-              Only <strong>Auto</strong> and valid manual values are allowed. Manual values are clamped to the sklearn range <strong>(0, 0.5]</strong>. Adjusting the slider never reruns the model.
+              Contamination values are explicit top percentages of the sorted Isolation Forest anomaly ranking. Example: 0.25 keeps the top 25% most anomalous edges. Adjusting the slider never reruns the model.
             </p>
           </div>
 
@@ -511,18 +497,17 @@ export default function ContaminationExperimentPanel() {
                 {draftValue}
               </div>
             </div>
-            <div className="text-xs text-gray-500">Draft manual value shown exactly before you add it to the experiment list.</div>
+            <div className="text-xs text-gray-500">Draft backbone percentage shown exactly before you add it to the experiment list.</div>
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <Button variant="secondary" onClick={addAuto}>Add Auto</Button>
-            <Button variant="secondary" onClick={addManualValue}>Add manual value</Button>
+            <Button variant="secondary" onClick={addManualValue}>Add backbone %</Button>
             <Button variant="secondary" onClick={fillRange}>Fill range</Button>
             <Button variant="secondary" onClick={() => setContaminationList(DEFAULT_CONTAMINATION_LIST)}>Reset list</Button>
           </div>
 
           <div>
-            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Current experiment values</div>
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Current backbone percentages</div>
             <div className="flex flex-wrap gap-2">
               {contaminationList.map((token) => (
                 <span key={token} className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-sm text-gray-700">
@@ -618,8 +603,8 @@ export default function ContaminationExperimentPanel() {
               <table className="min-w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-left text-gray-500">
-                    <th className="py-2 pr-4">Contamination</th>
-                    <th className="py-2 pr-4">Threshold</th>
+                    <th className="py-2 pr-4">Backbone %</th>
+                    <th className="py-2 pr-4">Cutoff rank</th>
                     <th className="py-2 pr-4">Flagged edges</th>
                     <th className="py-2 pr-4">Edge fraction</th>
                     <th className="py-2 pr-4">Node fraction</th>
@@ -632,7 +617,7 @@ export default function ContaminationExperimentPanel() {
                   {summaryRows.map((row) => (
                     <tr key={row.contamination} className="border-b border-gray-50 text-gray-700">
                       <td className="py-3 pr-4 font-semibold text-navy">{row.contamination}</td>
-                      <td className="py-3 pr-4">{row.threshold != null ? formatNumber(row.threshold, 6) : '—'}</td>
+                      <td className="py-3 pr-4">{row.cutoff_rank ?? '—'}</td>
                       <td className="py-3 pr-4">{row.flagged_edges}</td>
                       <td className="py-3 pr-4">{formatNumber(row.edge_fraction, 4)}</td>
                       <td className="py-3 pr-4">{formatNumber(row.node_fraction, 4)}</td>
@@ -648,7 +633,7 @@ export default function ContaminationExperimentPanel() {
 
           <div className="grid xl:grid-cols-2 gap-6">
             <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-              <div className="text-sm font-semibold text-navy mb-3">1. Contamination vs backbone size</div>
+              <div className="text-sm font-semibold text-navy mb-3">1. Backbone % vs backbone size</div>
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -663,7 +648,7 @@ export default function ContaminationExperimentPanel() {
             </div>
 
             <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-              <div className="text-sm font-semibold text-navy mb-3">2. Contamination vs node fraction</div>
+              <div className="text-sm font-semibold text-navy mb-3">2. Backbone % vs node fraction</div>
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -676,7 +661,7 @@ export default function ContaminationExperimentPanel() {
             </div>
 
             <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-              <div className="text-sm font-semibold text-navy mb-3">3. Contamination vs reachability</div>
+              <div className="text-sm font-semibold text-navy mb-3">3. Backbone % vs reachability</div>
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -689,7 +674,7 @@ export default function ContaminationExperimentPanel() {
             </div>
 
             <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-              <div className="text-sm font-semibold text-navy mb-3">4. Contamination vs connected components</div>
+              <div className="text-sm font-semibold text-navy mb-3">4. Backbone % vs connected components</div>
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -716,9 +701,9 @@ export default function ContaminationExperimentPanel() {
             </div>
 
             <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-              <div className="text-sm font-semibold text-navy mb-3">6. Threshold vs contamination</div>
+              <div className="text-sm font-semibold text-navy mb-3">6. Cutoff rank vs backbone %</div>
               <div className="text-xs text-gray-500 mb-3">
-                The plotted threshold is the real cutoff on <strong>score_samples</strong>. The <strong>decision_function</strong> cutoff remains 0 for every run.
+                The plotted cutoff rank is how deep the app cuts into the sorted anomaly ranking. For 0.25 it keeps roughly the top 25% edges.
               </div>
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={chartData}>
@@ -726,8 +711,8 @@ export default function ContaminationExperimentPanel() {
                   <XAxis dataKey="contamination" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip />
-                  <ReferenceLine y={0} stroke="#111827" strokeDasharray="4 4" />
-                  <Line type="monotone" dataKey="threshold" name="score_samples threshold" stroke={activeMethodColor} dot={false} strokeWidth={2} />
+                  
+                  <Line type="monotone" dataKey="cutoff_rank" name="Cutoff rank / selected top-k" stroke={activeMethodColor} dot={false} strokeWidth={2} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -753,7 +738,7 @@ export default function ContaminationExperimentPanel() {
           {selectedRun ? (
             <div className="space-y-6">
               <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-                <div className="text-sm font-semibold text-navy mb-2">Detail panel for contamination {selectedRun.contamination_label}</div>
+                <div className="text-sm font-semibold text-navy mb-2">Detail panel for backbone % {selectedRun.contamination_label}</div>
                 <div className="text-xs text-gray-500 leading-6">
                   Selected backbone edges: <strong>{selectedRun.selected_edge_keys.length}</strong> using preprocessing <strong>{selectedRun.preprocessing_used}</strong>. Compare it against <strong>{baselineDisplayLabel}</strong> or switch the baseline selector to compare against the full original graph.
                 </div>
