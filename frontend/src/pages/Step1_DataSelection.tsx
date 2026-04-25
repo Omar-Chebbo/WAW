@@ -8,6 +8,7 @@ import { useWorkflowStore } from '../store/workflowStore'
 import { useDatasets, fetchDatasetPreview, fetchDatasetStats, uploadDataset } from '../api/client'
 import { GraphCanvas } from '../components/graph/GraphCanvas'
 import { StepCard, Button, StatCard, Toast } from '../components/ui'
+import PaperExportButton from '../components/export/PaperExportButton'
 import type { GraphData, GraphStats } from '../types'
 
 export default function Step1() {
@@ -171,10 +172,25 @@ export default function Step1() {
 
             {preview && (
               <>
-                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                  Graph Preview {preview.sampled && <span className="font-normal">(sampled)</span>}
-                </h3>
-                <GraphCanvas data={preview} height={340} />
+                <div className="flex items-center justify-between mb-2 gap-3">
+                  <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
+                    Graph Preview {preview.sampled && <span className="font-normal">(sampled)</span>}
+                  </h3>
+                  <PaperExportButton
+                    config={{
+                      figureType: 'graph',
+                      title: `${selectedId ?? 'dataset'} preview`,
+                      filename: `${selectedId ?? 'dataset'}-preview`,
+                      payload: {
+                        title: `${selectedId ?? 'Dataset'} preview`,
+                        subtitle: preview.sampled ? 'Preview graph (sampled for interface performance).' : 'Preview graph.',
+                        graph: preview,
+                        show_labels: true,
+                      },
+                    }}
+                  />
+                </div>
+                <GraphCanvas data={preview} height={340} showLabels={true} />
               </>
             )}
           </div>

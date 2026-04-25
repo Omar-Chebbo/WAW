@@ -88,7 +88,21 @@ export const useWorkflowStore = create<SessionState & WorkflowActions>()(
         set({ currentView: 'lab', labTab: tab }),
 
       setDataset: (id, isCustom, stats) =>
-        set({ datasetId: id, isCustomDataset: isCustom, datasetStats: stats }),
+        set((s) => {
+          const changed = s.datasetId !== id || s.isCustomDataset !== isCustom
+          if (!changed) {
+            return { datasetId: id, isCustomDataset: isCustom, datasetStats: stats }
+          }
+          return {
+            datasetId: id,
+            isCustomDataset: isCustom,
+            datasetStats: stats,
+            scoresReady: false,
+            anomaliesReady: {},
+            backbonesReady: {},
+            evaluationReady: false,
+          }
+        }),
 
       setSelectedMethods: (methods) =>
         set({ selectedMethods: methods }),

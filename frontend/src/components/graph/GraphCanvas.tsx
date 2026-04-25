@@ -2,12 +2,11 @@
  * components/graph/GraphCanvas.tsx
  * Interactive force-directed graph using D3.
  * Handles zoom/pan, node drag, tooltips, backbone highlighting,
- * optional node-ID labels, and SVG/PNG download.
+ * optional node-ID labels.
  */
 import React, { useEffect, useRef, useCallback } from 'react'
 import * as d3 from 'd3'
 import type { GraphData, GraphNode, GraphLink } from '../../types'
-import { downloadSvgElement, downloadPngElement } from '../../utils/svgExport'
 
 interface Props {
   data: GraphData
@@ -18,7 +17,6 @@ interface Props {
   height?: number
   /** Show node ID text inside each node circle */
   showLabels?: boolean
-  /** If provided, a download button labelled with this string appears */
   downloadLabel?: string
   onNodeHover?: (node: GraphNode | null) => void
 }
@@ -36,7 +34,6 @@ export function GraphCanvas({
   accentColor = '#0F6E56',
   height = 480,
   showLabels = false,
-  downloadLabel,
   onNodeHover,
 }: Props) {
   const svgRef     = useRef<SVGSVGElement>(null)
@@ -138,16 +135,15 @@ export function GraphCanvas({
     if (showLabels) {
       node
         .append('text')
-        .text((d) => {
-          const r = rScale(d.degree)
-          // Only embed text if the circle fits at least 2 chars
-          return r >= 8 ? String(d.id) : ''
-        })
+        .text((d) => String(d.id))
         .attr('text-anchor',       'middle')
         .attr('dominant-baseline', 'central')
-        .attr('font-size',         (d) => Math.min(rScale(d.degree) * 0.85, 11) + 'px')
-        .attr('font-weight',       '600')
-        .attr('fill',              '#ffffff')
+        .attr('font-size',         (d) => Math.max(7, Math.min(rScale(d.degree) * 0.82, 11)) + 'px')
+        .attr('font-weight',       '700')
+        .attr('fill',              (d) => (rScale(d.degree) >= 7.5 ? '#ffffff' : '#0f172a'))
+        .attr('stroke',            (d) => (rScale(d.degree) >= 7.5 ? '#1E3A8A' : '#ffffff'))
+        .attr('stroke-width',      0.8)
+        .style('paint-order',      'stroke')
         .attr('pointer-events',    'none')
         .style('user-select',      'none')
     }
@@ -206,33 +202,6 @@ export function GraphCanvas({
       </div>
 
       {/* Download controls — only rendered when downloadLabel is provided */}
-      {downloadLabel && (
-        <div className="absolute top-2 right-2 flex gap-1">
-          <button
-            onClick={() =>
-              svgRef.current &&
-              downloadSvgElement(svgRef.current, `${downloadLabel}.svg`)
-            }
-            className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
-                      hover:bg-gray-50 text-gray-600 font-medium"
-            title="Download SVG"
-          >
-            ⬇ SVG
-          </button>
-
-          <button
-            onClick={() =>
-              svgRef.current &&
-              void downloadPngElement(svgRef.current, `${downloadLabel}.png`, { scale: 4 })
-            }
-            className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
-                      hover:bg-gray-50 text-gray-600 font-medium"
-            title="Download high-resolution PNG"
-          >
-            ⬇ PNG 4x
-          </button>
-        </div>
-      )}
     </div>
   )
 }

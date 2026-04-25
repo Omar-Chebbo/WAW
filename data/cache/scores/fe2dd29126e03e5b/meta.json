@@ -1,0 +1,59 @@
+{
+  "cache_version": "v1",
+  "dataset_fingerprint": "fe2dd29126e03e5b",
+  "dataset_name": "toth-elementary-school.csv",
+  "methods": {
+    "df": {
+      "columns": [
+        "source",
+        "target",
+        "weight",
+        "disparity_p_value"
+      ],
+      "origin": "computed",
+      "path": "C:\\Users\\user\\Desktop\\Master 2- Data Science\\Sem 2\\app\\data\\cache\\scores\\fe2dd29126e03e5b\\df.csv",
+      "rows": 16546,
+      "saved_at": "2026-04-23T16:02:18+00:00"
+    },
+    "hss": {
+      "columns": [
+        "source",
+        "target",
+        "weight",
+        "hss_score",
+        "salience",
+        "hss_in_backbone",
+        "distance"
+      ],
+      "origin": "computed",
+      "path": "C:\\Users\\user\\Desktop\\Master 2- Data Science\\Sem 2\\app\\data\\cache\\scores\\fe2dd29126e03e5b\\hss.csv",
+      "rows": 16546,
+      "saved_at": "2026-04-23T16:02:10+00:00"
+    },
+    "lp": {
+      "columns": [
+        "source",
+        "target",
+        "weight",
+        "local_path_index_1"
+      ],
+      "origin": "computed",
+      "path": "C:\\Users\\user\\Desktop\\Master 2- Data Science\\Sem 2\\app\\data\\cache\\scores\\fe2dd29126e03e5b\\lp.csv",
+      "rows": 16546,
+      "saved_at": "2026-04-23T16:40:18+00:00"
+    },
+    "pa": {
+      "columns": [
+        "source",
+        "target",
+        "weight",
+        "preferential_attachment_1"
+      ],
+      "origin": "computed",
+      "path": "C:\\Users\\user\\Desktop\\Master 2- Data Science\\Sem 2\\app\\data\\cache\\scores\\fe2dd29126e03e5b\\pa.csv",
+      "rows": 16546,
+      "saved_at": "2026-04-23T16:02:30+00:00"
+    }
+  },
+  "updated_at": "2026-04-23T16:40:18+00:00"
+}

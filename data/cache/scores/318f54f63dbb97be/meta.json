@@ -1,0 +1,59 @@
+{
+  "cache_version": "v1",
+  "dataset_fingerprint": "318f54f63dbb97be",
+  "dataset_name": "airports.csv",
+  "methods": {
+    "df": {
+      "columns": [
+        "source",
+        "target",
+        "disparity_p_value",
+        "weight"
+      ],
+      "origin": "computed",
+      "path": "C:\\Users\\user\\Desktop\\Master 2- Data Science\\Sem 2\\app\\data\\cache\\scores\\318f54f63dbb97be\\df.csv",
+      "rows": 16665,
+      "saved_at": "2026-04-23T10:13:04+00:00"
+    },
+    "hss": {
+      "columns": [
+        "source",
+        "target",
+        "hss_score",
+        "salience",
+        "distance",
+        "hss_in_backbone",
+        "weight"
+      ],
+      "origin": "computed",
+      "path": "C:\\Users\\user\\Desktop\\Master 2- Data Science\\Sem 2\\app\\data\\cache\\scores\\318f54f63dbb97be\\hss.csv",
+      "rows": 16665,
+      "saved_at": "2026-04-23T10:12:51+00:00"
+    },
+    "lp": {
+      "columns": [
+        "source",
+        "target",
+        "local_path_index_1",
+        "weight"
+      ],
+      "origin": "computed",
+      "path": "C:\\Users\\user\\Desktop\\Master 2- Data Science\\Sem 2\\app\\data\\cache\\scores\\318f54f63dbb97be\\lp.csv",
+      "rows": 16665,
+      "saved_at": "2026-04-23T10:29:13+00:00"
+    },
+    "pa": {
+      "columns": [
+        "source",
+        "target",
+        "preferential_attachment_1",
+        "weight"
+      ],
+      "origin": "computed",
+      "path": "C:\\Users\\user\\Desktop\\Master 2- Data Science\\Sem 2\\app\\data\\cache\\scores\\318f54f63dbb97be\\pa.csv",
+      "rows": 16665,
+      "saved_at": "2026-04-23T10:10:20+00:00"
+    }
+  },
+  "updated_at": "2026-04-23T10:29:14+00:00"
+}

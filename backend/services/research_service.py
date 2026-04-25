@@ -11,13 +11,19 @@ import networkx as nx
 import pandas as pd
 
 from backend.config import RAW_DIR, SESSIONS_DIR
+from backend.core.anomaly import normalize_selection_fraction
 from backend.core.contamination_analysis import run_contamination_experiment
 from backend.core.methods import METHOD_REGISTRY
 from backend.core.multi_feature_analysis import run_multi_feature_experiment
 from backend.core.iterative_extraction_analysis import run_iterative_extraction_experiment
-from backend.core.anomaly import normalize_selection_fraction
 from backend.core.research_analysis import run_research_analysis
 from backend.services.graph_service import graph_to_json, load_graph
+from backend.services.score_cache_service import (
+    PA_COLUMN,
+    LP_COLUMN,
+    get_or_compute_score_dataframe,
+    merge_pa_lp_scores,
+)
 from backend.services.score_service import load_scores
 
 
@@ -31,10 +37,6 @@ BENCHMARK_DATASETS = {
         "label": "Les Misérables",
     },
 }
-
-
-PA_COLUMN = "preferential_attachment_1"
-LP_COLUMN = "local_path_index_1"
 
 
 
@@ -71,7 +73,7 @@ def resolve_dataset_path(dataset_id: str, is_custom: bool = False) -> tuple[Path
 def build_scored_dataframe(
     dataset_path: Path,
     method_id: str,
-    score_source: str = "compute_fresh",
+    score_source: str = "auto",
     session_id: str | None = None,
 ):
     if method_id not in {"pa", "lp"}:
@@ -83,20 +85,22 @@ def build_scored_dataframe(
         scored_df = load_scores(session_id, method_id)
         return scored_df, "session_scores"
 
-    if score_source != "compute_fresh":
-        raise ValueError("score_source must be either 'compute_fresh' or 'session_scores'.")
+    if score_source not in {"auto", "reuse", "recompute"}:
+        raise ValueError("score_source must be 'auto', 'reuse', 'recompute', or 'session_scores'.")
 
-    G = load_graph(dataset_path)
-    config = METHOD_REGISTRY[method_id]
-    scored_graph = config["function"](G.copy(), **config.get("kwargs", {}))
-    scored_df = nx.to_pandas_edgelist(scored_graph)
-    return scored_df, "compute_fresh"
+    effective_strategy = "auto" if score_source == "reuse" else score_source
+    scored_df, source_kind = get_or_compute_score_dataframe(
+        dataset_path=dataset_path,
+        method_id=method_id,
+        strategy=effective_strategy,
+    )
+    return scored_df, source_kind
 
 
 
 def build_combined_scored_dataframe(
     dataset_path: Path,
-    score_source: str = "compute_fresh",
+    score_source: str = "auto",
     session_id: str | None = None,
 ) -> tuple[pd.DataFrame, str]:
     if score_source == "session_scores":
@@ -110,28 +114,18 @@ def build_combined_scored_dataframe(
             pass
         pa_df = load_scores(session_id, "pa")
         lp_df = load_scores(session_id, "lp")
-        resolved_source = "session_scores"
-    elif score_source == "compute_fresh":
-        original_graph = load_graph(dataset_path)
-        pa_graph = METHOD_REGISTRY["pa"]["function"](original_graph.copy(), **METHOD_REGISTRY["pa"].get("kwargs", {}))
-        lp_graph = METHOD_REGISTRY["lp"]["function"](original_graph.copy(), **METHOD_REGISTRY["lp"].get("kwargs", {}))
-        pa_df = nx.to_pandas_edgelist(pa_graph)
-        lp_df = nx.to_pandas_edgelist(lp_graph)
-        resolved_source = "compute_fresh"
-    else:
-        raise ValueError("score_source must be either 'compute_fresh' or 'session_scores'.")
+        return merge_pa_lp_scores(pa_df, lp_df), "session_scores"
 
-    merge_keys = ["source", "target"]
-    optional_keys = [key for key in ["weight"] if key in pa_df.columns and key in lp_df.columns]
-    merge_keys += optional_keys
+    if score_source not in {"auto", "reuse", "recompute"}:
+        raise ValueError("score_source must be 'auto', 'reuse', 'recompute', or 'session_scores'.")
 
-    required_pa = merge_keys + [PA_COLUMN]
-    required_lp = merge_keys + [LP_COLUMN]
-
-    combined = pa_df[required_pa].merge(lp_df[required_lp], on=merge_keys, how="inner")
-    if combined.empty:
-        raise ValueError("Could not build a combined PA/LP score table for the selected dataset.")
-    return combined, resolved_source
+    effective_strategy = "auto" if score_source == "reuse" else score_source
+    combined_df, source_kind = get_or_compute_score_dataframe(
+        dataset_path=dataset_path,
+        method_id="pa_lp",
+        strategy=effective_strategy,
+    )
+    return combined_df, source_kind
 
 
 
@@ -161,7 +155,7 @@ def run_contamination_study(
     method_id: str,
     contamination_values: list[str],
     preprocessing_mode: str | None = None,
-    score_source: str = "compute_fresh",
+    score_source: str = "auto",
     session_id: str | None = None,
     is_custom: bool = False,
 ) -> dict:
@@ -196,7 +190,8 @@ def run_contamination_study(
         "dataset_id": dataset_id,
         "dataset_label": dataset_label,
         "is_custom": is_custom,
-        "score_source": resolved_source,
+        "score_source": score_source,
+        "score_source_used": resolved_source,
         "session_id": session_id,
         "original_graph": original_graph_json,
         "original_edge_keys": original_edge_keys,
@@ -208,7 +203,7 @@ def run_contamination_study(
 def run_multi_feature_study(
     dataset_id: str,
     contamination: float | None = None,
-    score_source: str = "compute_fresh",
+    score_source: str = "auto",
     session_id: str | None = None,
     is_custom: bool = False,
     scaling_mode: str = "none",
@@ -233,10 +228,12 @@ def run_multi_feature_study(
         "dataset_id": dataset_id,
         "dataset_label": dataset_label,
         "is_custom": is_custom,
-        "score_source": resolved_source,
+        "score_source": score_source,
+        "score_source_used": resolved_source,
         "session_id": session_id,
         **result,
     }
+
 
 
 def run_iterative_extraction_study(
@@ -246,7 +243,7 @@ def run_iterative_extraction_study(
     stage_percents: list[float],
     low_region_percent: float = 10.0,
     high_region_percent: float = 10.0,
-    score_source: str = "compute_fresh",
+    score_source: str = "auto",
     session_id: str | None = None,
     is_custom: bool = False,
 ) -> dict:
@@ -272,7 +269,8 @@ def run_iterative_extraction_study(
         "dataset_id": dataset_id,
         "dataset_label": dataset_label,
         "is_custom": is_custom,
-        "score_source": resolved_source,
+        "score_source": score_source,
+        "score_source_used": resolved_source,
         "session_id": session_id,
         **result,
     }

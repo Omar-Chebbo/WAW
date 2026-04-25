@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.api import datasets, scores, anomalies, backbone, evaluation, research
+from backend.api import datasets, scores, anomalies, backbone, evaluation, research, exports
 from backend.api.websockets import router as ws_router
 
 # ── Logging setup ──────────────────────────────────────────────────
@@ -42,6 +42,7 @@ app.include_router(backbone.router,   prefix="/api/backbone",   tags=["backbone"
 app.include_router(evaluation.router, prefix="/api/evaluation", tags=["evaluation"])
 app.include_router(ws_router)          # WebSocket at /ws/{session_id}
 app.include_router(research.router,   prefix="/api/research",   tags=["research"])
+app.include_router(exports.router,    prefix="/api/exports",    tags=["exports"])
 
 # ── Serve built React frontend in production ───────────────────────
 static_dir = Path(__file__).parent / "static"

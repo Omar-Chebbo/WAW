@@ -4,6 +4,7 @@ import { fetchDatasetPreview, fetchBackbone } from '../../api/client'
 import { GraphCanvas } from '../graph/GraphCanvas'
 import { METHODS } from '../../constants/methods'
 import { Button } from '../ui'
+import PaperExportButton from '../export/PaperExportButton'
 import type { GraphData } from '../../types'
 
 type WorkspaceMode = 'wizard' | 'lab'
@@ -187,23 +188,28 @@ export default function VisualizationWorkspace({
           {viewMode === 'side' ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div>
-                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-                  Original Graph
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Original Graph</div>
+                  <PaperExportButton config={{ figureType: 'graph', title: 'Original graph', filename: `${datasetId}-original-graph`, payload: { title: 'Original graph', subtitle: original.sampled ? 'Preview graph sampled for interface performance.' : 'Original graph.', graph: original } }} />
                 </div>
 
                 <GraphCanvas
                   data={original}
                   height={420}
+                  showLabels={true}
                   downloadLabel="original-graph"
                 />
               </div>
 
               <div>
-                <div
-                  className="text-xs font-semibold uppercase tracking-wide mb-2"
-                  style={{ color: currentMethod?.color }}
-                >
-                  {currentMethod?.short} Backbone
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div
+                    className="text-xs font-semibold uppercase tracking-wide"
+                    style={{ color: currentMethod?.color }}
+                  >
+                    {currentMethod?.short} Backbone
+                  </div>
+                  <PaperExportButton config={{ figureType: 'graph', title: `${currentMethod?.short ?? activeMethod} backbone`, filename: `${datasetId}-${activeMethod}-backbone`, payload: { title: `${currentMethod?.short ?? activeMethod} backbone`, subtitle: 'Extracted backbone graph.', graph: backbone, accent_color: currentMethod?.color, show_labels: true } }} />
                 </div>
 
                 <GraphCanvas
@@ -217,14 +223,17 @@ export default function VisualizationWorkspace({
             </div>
           ) : (
             <div>
-              <div className="text-xs text-gray-400 mb-2">
-                <span className="inline-block w-6 border-b-2 border-gray-300 mr-1 align-middle" />
-                Removed edges (grey)
-                <span
-                  className="inline-block w-6 border-b-2 ml-4 mr-1 align-middle"
-                  style={{ borderColor: currentMethod?.color }}
-                />
-                Backbone edges
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <div className="text-xs text-gray-400">
+                  <span className="inline-block w-6 border-b-2 border-gray-300 mr-1 align-middle" />
+                  Removed edges (grey)
+                  <span
+                    className="inline-block w-6 border-b-2 ml-4 mr-1 align-middle"
+                    style={{ borderColor: currentMethod?.color }}
+                  />
+                  Backbone edges
+                </div>
+                <PaperExportButton config={{ figureType: 'graph', title: `${currentMethod?.short ?? activeMethod} overlay`, filename: `${datasetId}-${activeMethod}-overlay`, payload: { title: `${currentMethod?.short ?? activeMethod} overlay`, subtitle: 'Original graph with the extracted backbone edges highlighted.', graph: original, highlight_edges: Array.from(backboneEdgeSet ?? []), accent_color: currentMethod?.color } }} />
               </div>
 
               <GraphCanvas

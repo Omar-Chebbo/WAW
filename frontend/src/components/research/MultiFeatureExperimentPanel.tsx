@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { runMultiFeatureExperiment, useDatasets } from '../../api/client'
+import { fetchScoreStatus, runMultiFeatureExperiment, useDatasets } from '../../api/client'
 import { Button, MethodBadge, StatCard } from '../ui'
+import PaperExportButton from '../export/PaperExportButton'
 import { METHOD_MAP } from '../../constants/methods'
 import { useWorkflowStore } from '../../store/workflowStore'
 import type {
@@ -10,6 +11,7 @@ import type {
   MultiFeatureExperimentResponse,
   MultiFeatureQuadrantCount,
   MultiFeatureScalingMode,
+  ScoreCacheStatusResponse,
 } from '../../types'
 import MultiFeatureGraphPanel from './MultiFeatureGraphPanel'
 
@@ -220,8 +222,18 @@ function ScatterPlot({
               Hover any dot to see the edge and whether it was kept by PA, LP, or PA+LP.
             </div>
           </div>
-          <div className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-[11px] font-medium text-gray-600">
-            Dashed lines = PA / LP medians
+          <div className="flex items-center gap-2">
+            <div className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-[11px] font-medium text-gray-600">
+              Dashed lines = PA / LP medians
+            </div>
+            <PaperExportButton config={{ figureType: 'scatter', title: 'PA vs LP feature space', filename: 'pa-lp-feature-space', payload: { title: 'PA vs LP feature space', subtitle: 'Joint PA/LP score space with selection categories.', rows: points.map((point) => ({ x: point.pa, y: point.lp, category: point.selected_by_pa && point.selected_by_lp && point.selected_by_pa_lp ? 'Selected by all three' : point.selected_by_pa_lp && !point.selected_by_pa && !point.selected_by_lp ? 'Only PA+LP' : point.selected_by_pa && !point.selected_by_lp && !point.selected_by_pa_lp ? 'Only PA' : point.selected_by_lp && !point.selected_by_pa && !point.selected_by_pa_lp ? 'Only LP' : (point.selected_by_pa || point.selected_by_lp) && !point.selected_by_pa_lp ? 'Single-feature only' : 'Not selected' })), x_key: 'x', y_key: 'y', x_label: 'PA score', y_label: 'LP score', group_key: 'category', groups: [
+              { value: 'Selected by all three', label: 'Selected by all three', color: '#0F766E' },
+              { value: 'Only PA+LP', label: 'Only PA+LP', color: '#2563EB' },
+              { value: 'Only PA', label: 'Only PA', color: '#7C3AED' },
+              { value: 'Only LP', label: 'Only LP', color: '#C2410C' },
+              { value: 'Single-feature only', label: 'Single-feature only', color: '#B45309' },
+              { value: 'Not selected', label: 'Not selected', color: '#D7DEE8' },
+            ], vline_x: bounds.medianX, hline_y: bounds.medianY } }} />
           </div>
         </div>
 
@@ -468,6 +480,7 @@ function ExtremeTable({
           <div className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-[11px] font-medium text-gray-600">
             {rows.length} rows
           </div>
+          <PaperExportButton config={{ figureType: 'table', title, filename: safeFilename(title), payload: { title, subtitle: 'Extreme-edge inspection table.', columns: [ { key: 'Edge', label: 'Edge' }, { key: primaryLabel, label: primaryLabel }, { key: secondaryLabel, label: secondaryLabel }, { key: 'PA', label: 'PA' }, { key: 'LP', label: 'LP' }, { key: 'PA+LP', label: 'PA+LP' }, { key: 'PA rank', label: 'PA rank' }, { key: 'LP rank', label: 'LP rank' }, { key: 'PA+LP rank', label: 'PA+LP rank' } ], rows: rows.map((row) => ({ 'Edge': `${row.source} - ${row.target}`, [primaryLabel]: (primaryMethod === 'pa' ? row.pa_score : row.lp_score).toFixed(4), [secondaryLabel]: (primaryMethod === 'pa' ? row.lp_score : row.pa_score).toFixed(4), 'PA': row.selected_by_pa ? 'Yes' : 'No', 'LP': row.selected_by_lp ? 'Yes' : 'No', 'PA+LP': row.selected_by_pa_lp ? 'Yes' : 'No', 'PA rank': rankLabel(row.pa_rank), 'LP rank': rankLabel(row.lp_rank), 'PA+LP rank': rankLabel(row.pa_lp_rank) })) } }} />
           <Button variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => exportExtremeRows(title, rows)} disabled={!rows.length}>
             Download CSV
           </Button>
@@ -534,7 +547,8 @@ export default function MultiFeatureExperimentPanel() {
 
   const [datasetSelection, setDatasetSelection] = useState<DatasetOption | null>(datasetOptions[0] ?? null)
   const [contaminationValue, setContaminationValue] = useState('0.10')
-  const [scoreSource, setScoreSource] = useState<ContaminationScoreSource>('compute_fresh')
+  const [scoreSource, setScoreSource] = useState<ContaminationScoreSource>('auto')
+  const [cacheStatus, setCacheStatus] = useState<ScoreCacheStatusResponse | null>(null)
   const [scalingMode, setScalingMode] = useState<MultiFeatureScalingMode>('none')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -545,6 +559,26 @@ export default function MultiFeatureExperimentPanel() {
       setDatasetSelection(datasetOptions[0])
     }
   }, [datasetOptions, datasetSelection])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadCacheStatus() {
+      if (!datasetSelection) {
+        setCacheStatus(null)
+        return
+      }
+      try {
+        const data = await fetchScoreStatus(datasetSelection.id, ['pa', 'lp', 'pa_lp'], datasetSelection.isCustom)
+        if (!cancelled) setCacheStatus(data)
+      } catch {
+        if (!cancelled) setCacheStatus(null)
+      }
+    }
+    loadCacheStatus()
+    return () => {
+      cancelled = true
+    }
+  }, [datasetSelection])
 
   async function handleRun() {
     if (!datasetSelection) {
@@ -615,10 +649,11 @@ export default function MultiFeatureExperimentPanel() {
               />
             </div>
             <div>
-              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Score source</div>
+              <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600 mb-3">Saved score status: <strong>PA</strong> {cacheStatus?.methods?.pa?.status ?? 'missing'}, <strong>LP</strong> {cacheStatus?.methods?.lp?.status ?? 'missing'}, <strong>PA+LP</strong> {cacheStatus?.methods?.pa_lp?.status ?? 'missing'}.</div><div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Score source</div>
               <select value={scoreSource} onChange={(e) => setScoreSource(e.target.value as ContaminationScoreSource)} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
-                <option value="compute_fresh">Compute fresh</option>
+                <option value="auto">Auto reuse saved scores</option>
                 <option value="session_scores">Reuse wizard scores</option>
+                <option value="recompute">Force recompute</option>
               </select>
             </div>
           </div>
@@ -763,7 +798,7 @@ export default function MultiFeatureExperimentPanel() {
 
           <div className="grid xl:grid-cols-2 gap-6">
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-              <div className="text-lg font-bold text-navy mb-4">Overlap and difference analysis</div>
+              <div className="flex items-center justify-between gap-3 mb-4"><div className="text-lg font-bold text-navy">Overlap and difference analysis</div><PaperExportButton config={{ figureType: 'table', title: 'Overlap and difference analysis', filename: `${result.dataset_id}-overlap-difference-analysis`, payload: { title: 'Overlap and difference analysis', subtitle: 'Pairwise edge and node Jaccard values.', columns: [ { key: 'Comparison', label: 'Comparison' }, { key: 'Edge Jaccard', label: 'Edge Jaccard' }, { key: 'Node Jaccard', label: 'Node Jaccard' } ], rows: [ { 'Comparison': 'PA vs LP', 'Edge Jaccard': result.overlap.edges.pairwise_jaccard.pa_vs_lp.toFixed(4), 'Node Jaccard': result.overlap.nodes.pairwise_jaccard.pa_vs_lp.toFixed(4) }, { 'Comparison': 'PA vs PA+LP', 'Edge Jaccard': result.overlap.edges.pairwise_jaccard.pa_vs_pa_lp.toFixed(4), 'Node Jaccard': result.overlap.nodes.pairwise_jaccard.pa_vs_pa_lp.toFixed(4) }, { 'Comparison': 'LP vs PA+LP', 'Edge Jaccard': result.overlap.edges.pairwise_jaccard.lp_vs_pa_lp.toFixed(4), 'Node Jaccard': result.overlap.nodes.pairwise_jaccard.lp_vs_pa_lp.toFixed(4) } ] } }} /></div>
               <div className="overflow-auto">
                 <table className="min-w-full text-sm">
                   <thead>

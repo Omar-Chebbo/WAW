@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { runIterativeExtractionExperiment, useDatasets } from '../../api/client'
+import { fetchScoreStatus, runIterativeExtractionExperiment, useDatasets } from '../../api/client'
 import { Button, EmptyState, MethodBadge, StatCard } from '../ui'
 import { useWorkflowStore } from '../../store/workflowStore'
+import PaperExportButton from '../export/PaperExportButton'
 import { METHOD_MAP } from '../../constants/methods'
 import type {
   ContaminationScoreSource,
@@ -15,6 +16,7 @@ import type {
   IterativeScatterPoint,
   IterativeFeatureHistogram,
   IterativeHistogramGroup,
+  ScoreCacheStatusResponse,
 } from '../../types'
 
 type MethodTab = IterativeMethodId | 'compare_all'
@@ -97,9 +99,26 @@ function MetricTable({ result }: { result: IterativeMethodResult }) {
     ['degree_ks', 'Degree KS'],
     ['weight_ks', 'Weight KS'],
   ]
+  const exportRows = result.summary_rows.map((row) => ({
+    extraction: row.extraction,
+    target_percent: pct(row.target_percent),
+    stages: row.stages,
+    final_edges: intFmt(row.final_edges),
+    edge_fraction: num(row.edge_fraction),
+    node_fraction: num(row.node_fraction),
+    reachability: num(row.reachability),
+    connected_components: intFmt(row.connected_components),
+    avg_clustering: num(row.avg_clustering),
+    degree_ks: num(row.degree_ks),
+    weight_ks: num(row.weight_ks),
+  }))
 
   return (
-    <TableShell>
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <PaperExportButton config={{ figureType: 'table', title: `${methodLabel(result.method_id)} iterative summary metrics`, filename: `${result.method_id}-iterative-summary-metrics`, payload: { title: `${methodLabel(result.method_id)} iterative summary metrics`, rows: exportRows, columns: ['extraction','target_percent','stages','final_edges','edge_fraction','node_fraction','reachability','connected_components','avg_clustering','degree_ks','weight_ks'] } }} />
+      </div>
+      <TableShell>
       <table className="min-w-full text-sm">
         <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
           <tr>
@@ -125,13 +144,35 @@ function MetricTable({ result }: { result: IterativeMethodResult }) {
         </tbody>
       </table>
     </TableShell>
+    </div>
   )
 }
 
 function StageDetailsTable({ result }: { result: IterativeMethodResult }) {
   const scoreColumns = result.features
+  const exportRows = result.stages.map((stage) => {
+    const base: Record<string, string | number> = {
+      stage: stage.stage_index,
+      input_table_size: intFmt(stage.input_table_size),
+      selected_edges: intFmt(stage.selected_edges),
+      stage_percent_from_original: pct(stage.stage_percent_from_original),
+      cutoff_rank: intFmt(stage.cutoff_rank),
+    }
+    scoreColumns.forEach((column) => {
+      const stats = stage.score_stats[column] ?? {}
+      const label = column.includes('preferential') ? 'PA' : 'LP'
+      base[`mean_${label}`] = num(stats.mean)
+      base[`min_${label}`] = num(stats.min)
+      base[`max_${label}`] = num(stats.max)
+    })
+    return base
+  })
   return (
-    <TableShell>
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <PaperExportButton config={{ figureType: 'table', title: `${methodLabel(result.method_id)} iterative stage details`, filename: `${result.method_id}-iterative-stage-details`, payload: { title: `${methodLabel(result.method_id)} iterative stage details`, rows: exportRows } }} />
+      </div>
+      <TableShell>
       <table className="min-w-full text-sm">
         <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
           <tr>
@@ -175,6 +216,7 @@ function StageDetailsTable({ result }: { result: IterativeMethodResult }) {
         </tbody>
       </table>
     </TableShell>
+    </div>
   )
 }
 
@@ -217,7 +259,11 @@ function OverlapCards({ result }: { result: IterativeMethodResult }) {
 function RegionTable({ rows }: { rows: IterativeRegionRow[] }) {
   const stageKeys = Object.keys(rows[0] ?? {}).filter((key) => key.startsWith('stage_')).sort()
   return (
-    <TableShell>
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <PaperExportButton config={{ figureType: 'table', title: 'Iterative region analysis', filename: 'iterative-region-analysis', payload: { title: 'Iterative region analysis', rows: rows.map((row) => ({ ...row })) } }} />
+      </div>
+      <TableShell>
       <table className="min-w-full text-sm">
         <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
           <tr>
@@ -247,6 +293,7 @@ function RegionTable({ rows }: { rows: IterativeRegionRow[] }) {
         </tbody>
       </table>
     </TableShell>
+    </div>
   )
 }
 
@@ -301,7 +348,7 @@ function RegionCircleLens({ rows, methodId }: { rows: IterativeRegionRow[]; meth
 }
 
 
-function HistogramCard({ histogram, accent = '#4F46E5', xLabel = 'raw score' }: { histogram: IterativeFeatureHistogram; accent?: string; xLabel?: string }) {
+function HistogramCard({ histogram, accent = '#4F46E5', xLabel = 'raw score', exportTitle }: { histogram: IterativeFeatureHistogram; accent?: string; xLabel?: string; exportTitle?: string }) {
   const chartData = (histogram.bins ?? []).map((bin) => {
     const allCount = Number(bin.all_count) || 0
     const anomalies = Number(bin.selected_count) || 0
@@ -329,8 +376,11 @@ function HistogramCard({ histogram, accent = '#4F46E5', xLabel = 'raw score' }: 
             Gray = normal edges, colored = selected backbone/anomaly edges.
           </div>
         </div>
-        <div className="rounded-full bg-slate-50 px-3 py-1 text-[11px] font-semibold text-gray-600 border border-gray-100">
-          {intFmt(selected)} selected · {intFmt(normal)} normal
+        <div className="flex items-center gap-2">
+          <div className="rounded-full bg-slate-50 px-3 py-1 text-[11px] font-semibold text-gray-600 border border-gray-100">
+            {intFmt(selected)} selected · {intFmt(normal)} normal
+          </div>
+          <PaperExportButton config={{ figureType: 'histogram', title: exportTitle ?? `${histogram.label} histogram`, filename: (exportTitle ?? `${histogram.label} histogram`).toLowerCase().replace(/[^a-z0-9]+/g, '-'), payload: { title: exportTitle ?? `${histogram.label} histogram`, x_label: xLabel, y_label: 'Edge count', bins: chartData.map((bin) => ({ bin_center: bin.bin_center, anomalies: bin.anomalies, normal: bin.normal, count: Number(bin.normal) + Number(bin.anomalies) })), accent_color: accent, anomaly_label: 'Selected', normal_label: 'Normal' } }} />
         </div>
       </div>
 
@@ -385,7 +435,7 @@ function HistogramGroupView({ group, accent }: { group: IterativeHistogramGroup;
       </div>
       <div className="grid xl:grid-cols-2 gap-4">
         {cards.map(({ histogram, xLabel, accent: cardAccent }) => (
-          <HistogramCard key={`${group.label}-${histogram.feature}`} histogram={histogram} accent={cardAccent} xLabel={xLabel} />
+          <HistogramCard key={`${group.label}-${histogram.feature}`} histogram={histogram} accent={cardAccent} xLabel={xLabel} exportTitle={`${group.label} — ${histogram.label} histogram`} />
         ))}
       </div>
     </div>
@@ -464,7 +514,13 @@ function RankScatter({ result }: { result: IterativeMethodResult }) {
             x-axis = raw method score, y-axis = one-shot Isolation Forest rank. Rank 1 is the most anomalous. Vertical bands use your low/high region settings.
           </div>
         </div>
-        <div className="flex flex-wrap gap-2 text-[11px]">
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+          <PaperExportButton config={{ figureType: 'scatter', title: `${methodLabel(result.method_id)} score vs anomaly rank`, filename: `${result.method_id}-score-vs-anomaly-rank`, payload: { title: `${methodLabel(result.method_id)} score vs anomaly rank`, x_key: 'score', y_key: 'one_shot_rank', x_label: result.rank_scatter.x_axis, y_label: 'Anomaly rank', group_key: 'selection_category', rows: points.map((p) => ({ score: Number(p.score), one_shot_rank: Number(p.one_shot_rank), selection_category: p.selection_category })), groups: [
+            { value: 'common', label: 'Common', color: '#7C3AED' },
+            { value: 'one_shot_only', label: 'One-shot only', color: '#2563EB' },
+            { value: 'iterative_only', label: 'Iterative only', color: '#EA580C' },
+            { value: 'not_selected', label: 'Not selected', color: '#CBD5E1' },
+          ], vline_x: Number.isFinite(low) ? low : undefined } }} />
           <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-1 text-violet-700">Common</span>
           <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-blue-700">One-shot only</span>
           <span className="rounded-full border border-orange-200 bg-orange-50 px-2 py-1 text-orange-700">Iterative stage</span>
@@ -694,7 +750,8 @@ function GraphOverlay({ graph }: { graph: GraphData }) {
           <div className="text-sm font-bold text-navy">Graph views</div>
           <div className="text-xs text-gray-500 mt-1">Large readable views: original graph, one-shot backbone, and iterative backbone. Backbone cards keep the original graph as a light gray context.</div>
         </div>
-        <div className="flex flex-wrap gap-2 text-[11px]">
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+          <PaperExportButton config={{ figureType: 'graph_compare', title: 'Iterative extraction graph views', filename: 'iterative-extraction-graph-views', payload: { title: 'Iterative extraction graph views', left: { title: 'Original graph', graph, accent_color: '#2563EB' }, right: { title: 'One-shot backbone overlay', graph, highlight_edges: (graph.links ?? []).filter((l: any) => l.selection_category === 'common' || l.selection_category === 'one_shot_only').map((l: any) => l.edge_key), accent_color: '#2563EB' } } }} />
           <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-1 text-violet-700">purple = common</span>
           <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-blue-700">blue = one-shot only</span>
           <span className="rounded-full border border-orange-200 bg-orange-50 px-2 py-1 text-orange-700">orange = iterative only</span>
@@ -713,7 +770,11 @@ function GraphOverlay({ graph }: { graph: GraphData }) {
 function EdgeInspector({ result }: { result: IterativeMethodResult }) {
   const rows = result.edge_inspector.slice(0, 140)
   return (
-    <TableShell>
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <PaperExportButton config={{ figureType: 'table', title: `${methodLabel(result.method_id)} iterative edge inspector`, filename: `${result.method_id}-iterative-edge-inspector`, payload: { title: `${methodLabel(result.method_id)} iterative edge inspector`, rows } }} />
+      </div>
+      <TableShell>
       <table className="min-w-full text-sm">
         <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
           <tr>
@@ -744,6 +805,7 @@ function EdgeInspector({ result }: { result: IterativeMethodResult }) {
         </tbody>
       </table>
     </TableShell>
+    </div>
   )
 }
 
@@ -828,8 +890,11 @@ function CompareAllTab({ response }: { response: IterativeExtractionResponse }) 
   const matrix = response.compare_all.jaccard_matrix
   return (
     <div className="space-y-8">
-      <section>
+      <section className="space-y-3">
         <SectionTitle title="All selected methods: one-shot vs iterative" subtitle="Every selected method appears twice: normal one-shot and progressive iterative extraction." />
+        <div className="flex justify-end">
+          <PaperExportButton config={{ figureType: 'table', title: 'Iterative compare-all summary', filename: 'iterative-compare-all-summary', payload: { title: 'Iterative compare-all summary', rows: entries } }} />
+        </div>
         <TableShell>
           <table className="min-w-full text-sm">
             <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
@@ -864,8 +929,11 @@ function CompareAllTab({ response }: { response: IterativeExtractionResponse }) 
         </TableShell>
       </section>
 
-      <section>
+      <section className="space-y-3">
         <SectionTitle title="Jaccard overlap matrix" subtitle="Higher values mean two final backbones select similar edge sets." />
+        <div className="flex justify-end">
+          <PaperExportButton config={{ figureType: 'table', title: 'Iterative Jaccard overlap matrix', filename: 'iterative-jaccard-overlap-matrix', payload: { title: 'Iterative Jaccard overlap matrix', rows: matrix } }} />
+        </div>
         <TableShell>
           <table className="min-w-full text-xs">
             <thead className="bg-gray-50 text-gray-500">
@@ -886,8 +954,11 @@ function CompareAllTab({ response }: { response: IterativeExtractionResponse }) 
         </TableShell>
       </section>
 
-      <section>
+      <section className="space-y-3">
         <SectionTitle title="Tail-region summary" subtitle="A quick view of whether iterative extraction reduces or increases high-tail domination for each method." />
+        <div className="flex justify-end">
+          <PaperExportButton config={{ figureType: 'table', title: 'Iterative tail-region summary', filename: 'iterative-tail-region-summary', payload: { title: 'Iterative tail-region summary', rows: response.compare_all.region_summary } }} />
+        </div>
         <TableShell>
           <table className="min-w-full text-sm">
             <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
@@ -933,7 +1004,8 @@ export default function IterativeExtractionPanel() {
   const { data: datasets = [] } = useDatasets()
   const [selectedDataset, setSelectedDataset] = useState(datasetId ?? 'lesmis')
   const [selectedIsCustom, setSelectedIsCustom] = useState(isCustomDataset)
-  const [scoreSource, setScoreSource] = useState<ContaminationScoreSource>('compute_fresh')
+  const [scoreSource, setScoreSource] = useState<ContaminationScoreSource>('auto')
+  const [cacheStatus, setCacheStatus] = useState<ScoreCacheStatusResponse | null>(null)
   const [methods, setMethods] = useState<IterativeMethodId[]>(['pa'])
   const [targetPercent, setTargetPercent] = useState(20)
   const [stageCount, setStageCount] = useState(2)
@@ -954,6 +1026,26 @@ export default function IterativeExtractionPanel() {
   const stageSum = stagePercents.reduce((sum, v) => sum + (Number.isFinite(v) ? v : 0), 0)
   const stageSumValid = Math.abs(stageSum - targetPercent) <= 0.01
   const regionSumValid = lowRegionPercent >= 0 && highRegionPercent >= 0 && lowRegionPercent + highRegionPercent <= 100
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadCacheStatus() {
+      if (!selectedDataset) {
+        setCacheStatus(null)
+        return
+      }
+      try {
+        const data = await fetchScoreStatus(selectedDataset, ['pa', 'lp', 'pa_lp'], selectedIsCustom)
+        if (!cancelled) setCacheStatus(data)
+      } catch {
+        if (!cancelled) setCacheStatus(null)
+      }
+    }
+    loadCacheStatus()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedDataset, selectedIsCustom])
 
   function updateStageCount(count: number) {
     const next = Math.max(1, Math.min(8, count))
@@ -1062,10 +1154,11 @@ export default function IterativeExtractionPanel() {
               {datasetOptions.map((option) => <option key={`${option.isCustom}:${option.id}`} value={`${option.isCustom ? 'custom' : 'raw'}:${option.id}`}>{option.label}</option>)}
             </select>
             <div className="mt-3">
-              <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Score source</label>
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Score source</label><div className="mt-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">Saved score status: <strong>PA</strong> {cacheStatus?.methods?.pa?.status ?? 'missing'}, <strong>LP</strong> {cacheStatus?.methods?.lp?.status ?? 'missing'}, <strong>PA+LP</strong> {cacheStatus?.methods?.pa_lp?.status ?? 'missing'}.</div>
               <select value={scoreSource} onChange={(e) => setScoreSource(e.target.value as ContaminationScoreSource)} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-teal">
-                <option value="compute_fresh">Compute fresh scores</option>
+                <option value="auto">Auto reuse saved scores</option>
                 <option value="session_scores">Use current session scores</option>
+                <option value="recompute">Force recompute</option>
               </select>
             </div>
           </div>

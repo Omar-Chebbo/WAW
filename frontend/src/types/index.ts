@@ -332,6 +332,7 @@ export interface MultiFeatureExperimentResponse {
   dataset_label: string
   is_custom: boolean
   score_source: ContaminationScoreSource
+  score_source_used?: string
   session_id?: string | null
   feature_columns: string[]
   contamination: number | string
@@ -442,7 +443,30 @@ export interface ResearchAnalysisResponse {
   }
 }
 // ── Contamination lab types ──────────────────────────────────────
-export type ContaminationScoreSource = 'compute_fresh' | 'session_scores'
+export type ContaminationScoreSource = 'auto' | 'reuse' | 'recompute' | 'session_scores'
+
+export type ScoreStrategy = 'auto' | 'reuse' | 'recompute'
+
+export interface ScoreCacheMethodStatus {
+  exists: boolean
+  status: 'cached' | 'derivable' | 'missing'
+  cached: boolean
+  can_build_from_components: boolean
+  components_available: string[]
+  cached_at?: string | null
+  rows?: number | null
+  columns?: string[] | null
+  path?: string | null
+}
+
+export interface ScoreCacheStatusResponse {
+  dataset_id: string
+  is_custom: boolean
+  dataset_name: string
+  dataset_fingerprint: string
+  cache_version: string
+  methods: Record<string, ScoreCacheMethodStatus>
+}
 
 export interface ContaminationRunResult {
   contamination_label: string
@@ -468,6 +492,7 @@ export interface ContaminationExperimentResponse {
   dataset_label: string
   is_custom: boolean
   score_source: ContaminationScoreSource
+  score_source_used?: string
   session_id?: string | null
   original_graph: GraphData
   original_edge_keys: string[]
@@ -651,6 +676,7 @@ export interface IterativeExtractionResponse {
   dataset_label: string
   is_custom: boolean
   score_source: ContaminationScoreSource
+  score_source_used?: string
   session_id?: string | null
   selection_rule: string
   stage_percent_reference: string

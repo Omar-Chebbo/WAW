@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react'
 import type { GraphData } from '../../types'
+import PaperExportButton from '../export/PaperExportButton'
 
 interface Props {
   title: string
@@ -90,11 +91,14 @@ export default function MultiFeatureGraphPanel({
             {showOriginal ? `${graph.nodes.length} nodes · ${graph.links.length} edges` : `${selectedNodeIds.size} nodes · ${selectedLinks.length} edges`}
           </div>
         </div>
-        {!showOriginal ? (
-          <div className="rounded-full bg-gray-50 border border-gray-200 px-3 py-1 text-[11px] font-medium text-gray-600">
-            Gray = original context · Color = kept backbone
-          </div>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {!showOriginal ? (
+            <div className="rounded-full bg-gray-50 border border-gray-200 px-3 py-1 text-[11px] font-medium text-gray-600">
+              Gray = original context · Color = kept backbone
+            </div>
+          ) : null}
+          <PaperExportButton config={{ figureType: 'graph', title, filename: title.toLowerCase().replace(/[^a-z0-9]+/g, '-'), payload: { title, subtitle: showOriginal ? 'Original graph.' : 'Backbone highlighted over the original layout.', graph, highlight_edges: showOriginal ? [] : selectedEdgeKeys, accent_color: accentColor, show_labels: true } }} />
+        </div>
       </div>
 
       <div className="rounded-xl border border-gray-100 bg-slate-50 overflow-hidden">

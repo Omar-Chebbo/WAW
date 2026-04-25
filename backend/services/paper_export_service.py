@@ -1,0 +1,677 @@
+from __future__ import annotations
+
+import io
+import math
+import textwrap
+from typing import Any
+
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib import patheffects as pe
+from matplotlib.patches import Patch
+from matplotlib.ticker import FuncFormatter, MaxNLocator
+import networkx as nx
+import numpy as np
+
+
+PAPER_RC = {
+    'figure.facecolor': 'white',
+    'axes.facecolor': 'white',
+    'axes.edgecolor': '#4B5563',
+    'axes.labelcolor': '#0F172A',
+    'axes.titlesize': 11,
+    'axes.titleweight': 'bold',
+    'axes.labelsize': 10.5,
+    'xtick.color': '#334155',
+    'ytick.color': '#334155',
+    'xtick.labelsize': 8.5,
+    'ytick.labelsize': 8.5,
+    'grid.color': '#D7DEE8',
+    'grid.linestyle': ':',
+    'grid.linewidth': 0.7,
+    'legend.frameon': False,
+    'legend.fontsize': 8.5,
+    'font.family': 'serif',
+    'font.serif': ['STIXGeneral', 'Times New Roman', 'DejaVu Serif'],
+    'mathtext.fontset': 'stix',
+    'axes.unicode_minus': False,
+    'savefig.bbox': 'tight',
+    'savefig.pad_inches': 0.08,
+    'pdf.fonttype': 42,
+    'ps.fonttype': 42,
+    'svg.fonttype': 'none',
+    'lines.linewidth': 1.8,
+    'patch.linewidth': 0.5,
+}
+
+PALETTE = ['#1F2937', '#1D4ED8', '#B45309', '#0F766E', '#7C3AED', '#9A3412']
+LINESTYLES = ['-', '--', '-.', ':', (0, (5, 1)), (0, (3, 1, 1, 1))]
+ACCENT = '#1D4ED8'
+NORMAL = '#D1D5DB'
+TEXT = '#0F172A'
+SUBTEXT = '#475569'
+GRID = '#E2E8F0'
+
+
+def _apply_style():
+    plt.rcParams.update(PAPER_RC)
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        num = float(value)
+        if math.isfinite(num):
+            return num
+    except Exception:
+        pass
+    return default
+
+
+def _slugify(text: str) -> str:
+    out = ''.join(ch.lower() if ch.isalnum() else '-' for ch in text.strip())
+    while '--' in out:
+        out = out.replace('--', '-')
+    return out.strip('-') or 'figure'
+
+
+def _series_color(series: dict[str, Any], default: str = ACCENT) -> str:
+    return series.get('color') or default
+
+
+def _save_figure(fig, fmt: str) -> bytes:
+    buf = io.BytesIO()
+    fmt = fmt.lower()
+    if fmt == 'png':
+        fig.savefig(buf, format='png', dpi=420)
+    elif fmt == 'svg':
+        fig.savefig(buf, format='svg')
+    elif fmt == 'pdf':
+        fig.savefig(buf, format='pdf')
+    else:
+        raise ValueError(f'Unsupported export format: {fmt}')
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
+def _finalize(fig, fmt: str) -> bytes:
+    return _save_figure(fig, fmt)
+
+
+def _compute_layout(graph: nx.Graph, seed: int = 42):
+    if graph.number_of_nodes() == 0:
+        return {}
+    if graph.number_of_nodes() == 1:
+        node = next(iter(graph.nodes))
+        return {node: (0.0, 0.0)}
+    n = max(graph.number_of_nodes(), 2)
+    return nx.spring_layout(graph, seed=seed, k=max(0.18, 2.0 / math.sqrt(n)), iterations=250)
+
+
+def _build_graph(graph_data: dict[str, Any]) -> nx.Graph:
+    g = nx.Graph()
+    for node in graph_data.get('nodes', []):
+        node_id = str(node.get('id'))
+        g.add_node(node_id, degree=_safe_float(node.get('degree')))
+    for link in graph_data.get('links', []):
+        source = link.get('source')
+        target = link.get('target')
+        if isinstance(source, dict):
+            source = source.get('id')
+        if isinstance(target, dict):
+            target = target.get('id')
+        if source is None or target is None:
+            continue
+        g.add_edge(str(source), str(target), weight=_safe_float(link.get('weight'), 1.0))
+    return g
+
+
+def _wrap(text: Any, width: int = 22) -> str:
+    text = str(text)
+    if not text:
+        return ''
+    if len(text) <= width:
+        return text
+    return '\n'.join(textwrap.wrap(text, width=width, break_long_words=False, break_on_hyphens=False))
+
+
+# readable axis formatter for wide score ranges
+
+def _human_tick(value, _pos=None):
+    value = float(value)
+    abs_val = abs(value)
+    if abs_val >= 1_000_000:
+        return f'{value/1_000_000:.1f}M'
+    if abs_val >= 1_000:
+        return f'{value/1_000:.1f}k'
+    if abs_val >= 100:
+        return f'{value:.0f}'
+    if abs_val >= 1:
+        return f'{value:.1f}'
+    if abs_val == 0:
+        return '0'
+    return f'{value:.2g}'
+
+
+def _style_axes(ax, *, x_label: str | None = None, y_label: str | None = None, grid_axis: str = 'y'):
+    if x_label:
+        ax.set_xlabel(x_label, labelpad=8)
+    if y_label:
+        ax.set_ylabel(y_label, labelpad=8)
+    ax.grid(True, axis=grid_axis, color=GRID, linewidth=0.8, linestyle=':')
+    ax.spines[['top', 'right']].set_visible(False)
+    ax.spines['left'].set_color('#64748B')
+    ax.spines['bottom'].set_color('#64748B')
+    ax.tick_params(axis='both', colors='#334155', length=4, width=0.8)
+
+
+def _apply_title(fig, title: str | None, subtitle: str | None = None):
+    if title:
+        fig.suptitle(title, x=0.08, y=0.98, ha='left', va='top', fontsize=11.5, fontweight='bold', color=TEXT)
+    if subtitle:
+        fig.text(0.08, 0.94, textwrap.fill(str(subtitle), width=92), ha='left', va='top', fontsize=8.8, color=SUBTEXT)
+
+
+def _legend_above(ax, ncol: int = 2, *, y: float = 1.10):
+    handles, labels = ax.get_legend_handles_labels()
+    if not handles:
+        return
+    ax.legend(
+        handles,
+        labels,
+        loc='upper center',
+        bbox_to_anchor=(0.5, y),
+        ncol=min(max(ncol, 1), max(len(labels), 1)),
+        frameon=False,
+        borderaxespad=0.2,
+        columnspacing=1.1,
+        handletextpad=0.5,
+    )
+
+
+def _reserve_paper_margins(fig, *, top: float = 0.84, bottom: float = 0.16, left: float = 0.11, right: float = 0.98):
+    fig.subplots_adjust(top=top, bottom=bottom, left=left, right=right)
+
+
+def _maybe_symlog(ax, values: np.ndarray, axis: str):
+    vals = np.asarray(values, dtype=float)
+    vals = vals[np.isfinite(vals)]
+    if len(vals) < 5:
+        return
+    if np.any(vals < 0):
+        return
+    positive = vals[vals > 0]
+    if len(positive) < 5:
+        return
+    p50 = np.percentile(positive, 50)
+    p95 = np.percentile(positive, 95)
+    vmax = float(np.max(positive))
+    if p50 <= 0:
+        return
+    if vmax / max(p50, 1e-9) < 25 and p95 / max(p50, 1e-9) < 12:
+        return
+    linthresh = max(1.0, float(np.percentile(positive, 20)))
+    if axis == 'x':
+        ax.set_xscale('symlog', linthresh=linthresh)
+    else:
+        ax.set_yscale('symlog', linthresh=linthresh)
+
+
+def render_histogram(payload: dict[str, Any], fmt: str) -> bytes:
+    _apply_style()
+    title = payload.get('title', 'Histogram')
+    bins = payload.get('bins', [])
+    x_label = payload.get('x_label', 'Value')
+    y_label = payload.get('y_label', 'Count')
+    anomaly_key = payload.get('anomaly_key', 'anomalies')
+    normal_key = payload.get('normal_key', 'normal')
+    total_key = payload.get('total_key', 'count')
+    anomaly_label = payload.get('anomaly_label', 'Anomaly')
+    normal_label = payload.get('normal_label', 'Normal')
+    accent = payload.get('accent_color', ACCENT)
+    normal_color = payload.get('normal_color', NORMAL)
+
+    centers = np.array([_safe_float(row.get('bin_center', row.get('bin', idx))) for idx, row in enumerate(bins)], dtype=float)
+    if bins and 'bin_left' in bins[0] and 'bin_right' in bins[0]:
+        widths = np.array([max(_safe_float(row.get('bin_right')) - _safe_float(row.get('bin_left')), 1e-9) for row in bins], dtype=float)
+    else:
+        diffs = np.diff(np.sort(centers)) if len(centers) > 1 else np.array([1.0])
+        base = float(np.median(diffs)) if len(diffs) else 1.0
+        widths = np.array([base * 0.86 for _ in centers], dtype=float)
+
+    anomaly = np.array([_safe_float(row.get(anomaly_key)) for row in bins], dtype=float) if bins else np.array([])
+    normal = np.array([_safe_float(row.get(normal_key)) for row in bins], dtype=float) if bins else np.array([])
+    total = np.array([_safe_float(row.get(total_key, row.get('count'))) for row in bins], dtype=float) if bins else np.array([])
+
+    fig, ax = plt.subplots(figsize=(6.8, 4.4))
+    _apply_title(fig, title, payload.get('subtitle'))
+    _reserve_paper_margins(fig, top=0.83, bottom=0.16, left=0.12, right=0.98)
+    has_split = len(anomaly) and (anomaly.sum() > 0 or normal.sum() > 0)
+
+    if has_split:
+        selected_n = int(anomaly.sum())
+        total_n = int(anomaly.sum() + normal.sum())
+        ax.bar(centers, normal, width=widths, color=normal_color, edgecolor='white', linewidth=0.45, label=f'{normal_label} (n={int(normal.sum())})', zorder=2)
+        ax.bar(centers, anomaly, width=widths, bottom=normal, color=accent, edgecolor='white', linewidth=0.45, label=f'{anomaly_label} (n={selected_n}, {100.0*selected_n/max(total_n,1):.1f}%)', zorder=3)
+        _legend_above(ax, ncol=2, y=1.06)
+    else:
+        ax.bar(centers, total, width=widths, color=accent, edgecolor='white', linewidth=0.45, zorder=3, label=payload.get('single_label', 'Count'))
+        if payload.get('single_label'):
+            _legend_above(ax, ncol=1, y=1.06)
+
+    _style_axes(ax, x_label=x_label, y_label=y_label, grid_axis='y')
+    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.xaxis.set_major_formatter(FuncFormatter(_human_tick))
+    _maybe_symlog(ax, centers, 'x')
+    ax.margins(x=0.02)
+    return _finalize(fig, fmt)
+
+
+def render_bar(payload: dict[str, Any], fmt: str) -> bytes:
+    _apply_style()
+    title = payload.get('title', 'Bar chart')
+    rows = payload.get('rows', [])
+    x_key = payload.get('x_key', 'label')
+    series = payload.get('series', [])
+    horizontal = payload.get('horizontal', False)
+    x_labels = [str(row.get(x_key, '')) for row in rows]
+
+    fig_w = max(6.8, min(10.5, 1.0 + 0.58 * max(len(x_labels), 4)))
+    fig, ax = plt.subplots(figsize=(fig_w, 4.4))
+    _apply_title(fig, title, payload.get('subtitle'))
+    _reserve_paper_margins(fig, top=0.83, bottom=0.22 if not horizontal else 0.14, left=0.13 if horizontal else 0.10, right=0.98)
+    indices = np.arange(len(rows))
+
+    if not series:
+        series = [{'key': payload.get('y_key', 'value'), 'label': payload.get('y_label', 'Value'), 'color': payload.get('accent_color', ACCENT)}]
+
+    width = 0.76 / max(len(series), 1)
+    for i, spec in enumerate(series):
+        vals = np.array([_safe_float(r.get(spec['key'])) for r in rows], dtype=float)
+        color = _series_color(spec, PALETTE[i % len(PALETTE)])
+        label = spec.get('label', spec['key'])
+        if horizontal:
+            ax.barh(indices + (i - (len(series)-1)/2)*width, vals, height=width, color=color, label=label, edgecolor='white', linewidth=0.7, zorder=3)
+        else:
+            ax.bar(indices + (i - (len(series)-1)/2)*width, vals, width=width, color=color, label=label, edgecolor='white', linewidth=0.7, zorder=3)
+
+    wrapped_labels = [_wrap(x, 16 if not horizontal else 26) for x in x_labels]
+    if horizontal:
+        ax.set_yticks(indices)
+        ax.set_yticklabels(wrapped_labels)
+        _style_axes(ax, x_label=payload.get('y_axis_label', 'Value'), grid_axis='x')
+    else:
+        ax.set_xticks(indices)
+        rotation = payload.get('x_rotation')
+        if rotation is None:
+            rotation = 0 if max((len(x) for x in x_labels), default=0) < 12 else 20
+        ax.set_xticklabels(wrapped_labels, rotation=rotation, ha='right' if rotation else 'center')
+        _style_axes(ax, y_label=payload.get('y_axis_label', 'Value'), grid_axis='y')
+    ax.yaxis.set_major_locator(MaxNLocator(integer=payload.get('integer_y', False)))
+    if any(spec.get('label') for spec in series):
+        _legend_above(ax, ncol=min(len(series), 3), y=1.06)
+    return _finalize(fig, fmt)
+
+
+def render_line(payload: dict[str, Any], fmt: str) -> bytes:
+    _apply_style()
+    title = payload.get('title', 'Line chart')
+    rows = payload.get('rows', [])
+    x_key = payload.get('x_key', 'x')
+    series = payload.get('series', [])
+    x_label = payload.get('x_label', x_key)
+    y_label = payload.get('y_label', 'Value')
+    x_values = [row.get(x_key) for row in rows]
+    fig, ax = plt.subplots(figsize=(6.8, 4.3))
+    _apply_title(fig, title, payload.get('subtitle'))
+    _reserve_paper_margins(fig, top=0.83, bottom=0.16, left=0.12, right=0.98)
+    categorical = any(isinstance(v, str) for v in x_values)
+    plotted_any = False
+    for i, spec in enumerate(series):
+        y = [_safe_float(r.get(spec['key'])) for r in rows]
+        color = _series_color(spec, PALETTE[i % len(PALETTE)])
+        label = spec.get('label', spec['key'])
+        style = spec.get('style', LINESTYLES[i % len(LINESTYLES)])
+        marker = spec.get('marker', 'o' if len(rows) <= 10 else None)
+        ax.plot(x_values, y, label=label, color=color, linewidth=1.8, linestyle=style, marker=marker, markersize=3.8, zorder=3)
+        plotted_any = True
+    if payload.get('vline_x') is not None:
+        ax.axvline(payload.get('vline_x'), color='#64748B', linestyle='--', linewidth=1.0, zorder=2)
+    if payload.get('hline_y') is not None:
+        ax.axhline(payload.get('hline_y'), color='#64748B', linestyle='--', linewidth=1.0, zorder=2)
+    _style_axes(ax, x_label=x_label, y_label=y_label, grid_axis='both')
+    if not categorical:
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=min(max(len(rows), 4), 8)))
+        ax.yaxis.set_major_formatter(FuncFormatter(_human_tick))
+        _maybe_symlog(ax, np.asarray([_safe_float(v) for v in x_values], dtype=float), 'x')
+        for spec in series:
+            _maybe_symlog(ax, np.asarray([_safe_float(r.get(spec['key'])) for r in rows], dtype=float), 'y')
+    else:
+        for tick in ax.get_xticklabels():
+            tick.set_rotation(18)
+            tick.set_ha('right')
+    if plotted_any:
+        _legend_above(ax, ncol=max(1, min(len(series), 3)), y=1.06)
+    return _finalize(fig, fmt)
+
+
+def render_scatter(payload: dict[str, Any], fmt: str) -> bytes:
+    _apply_style()
+    title = payload.get('title', 'Scatter plot')
+    rows = payload.get('rows', [])
+    x_key = payload.get('x_key', 'x')
+    y_key = payload.get('y_key', 'y')
+    group_key = payload.get('group_key')
+    groups = payload.get('groups', [])
+    x_label = payload.get('x_label', x_key)
+    y_label = payload.get('y_label', y_key)
+    fig, ax = plt.subplots(figsize=(6.8, 4.6))
+    _apply_title(fig, title, payload.get('subtitle'))
+    top_margin = 0.77 if payload.get('subtitle') else 0.81
+    _reserve_paper_margins(fig, top=top_margin, bottom=0.16, left=0.12, right=0.82 if group_key else 0.98)
+    if group_key:
+        values = {row.get(group_key) for row in rows}
+        if not groups:
+            groups = [{'value': value, 'label': str(value), 'color': PALETTE[i % len(PALETTE)]} for i, value in enumerate(sorted(values, key=lambda x: str(x)))]
+        ordered = sorted(groups, key=lambda g: 0 if str(g.get('value', '')).lower() in {'not selected', 'normal'} else 1)
+        for i, spec in enumerate(ordered):
+            filtered = [row for row in rows if row.get(group_key) == spec['value']]
+            if not filtered:
+                continue
+            xs = [_safe_float(r.get(x_key)) for r in filtered]
+            ys = [_safe_float(r.get(y_key)) for r in filtered]
+            is_background = str(spec.get('label', spec.get('value', ''))).lower() == 'not selected'
+            ax.scatter(xs, ys, s=18 if is_background else 30, alpha=0.45 if is_background else 0.85, color=spec.get('color', PALETTE[i % len(PALETTE)]), label=spec.get('label', spec['value']), edgecolors='none', linewidths=0, zorder=2 if is_background else 3)
+        ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1.0), frameon=False, fontsize=8.2, borderaxespad=0.0, handletextpad=0.4)
+    else:
+        ax.scatter([_safe_float(r.get(x_key)) for r in rows], [_safe_float(r.get(y_key)) for r in rows], s=34, alpha=0.82, color=payload.get('accent_color', ACCENT), edgecolors='none', linewidths=0, zorder=3)
+    if payload.get('vline_x') is not None:
+        ax.axvline(_safe_float(payload['vline_x']), color='#64748B', linestyle='--', linewidth=1.0, zorder=2)
+    if payload.get('hline_y') is not None:
+        ax.axhline(_safe_float(payload['hline_y']), color='#64748B', linestyle='--', linewidth=1.0, zorder=2)
+    _style_axes(ax, x_label=x_label, y_label=y_label, grid_axis='both')
+    ax.xaxis.set_major_formatter(FuncFormatter(_human_tick))
+    ax.yaxis.set_major_formatter(FuncFormatter(_human_tick))
+    _maybe_symlog(ax, np.asarray([_safe_float(r.get(x_key)) for r in rows], dtype=float), 'x')
+    _maybe_symlog(ax, np.asarray([_safe_float(r.get(y_key)) for r in rows], dtype=float), 'y')
+    return _finalize(fig, fmt)
+
+
+def render_ccdf(payload: dict[str, Any], fmt: str) -> bytes:
+    _apply_style()
+    title = payload.get('title', 'Distribution comparison')
+    series = payload.get('series', [])
+    x_label = payload.get('x_label', 'x')
+    y_label = payload.get('y_label', 'P(X ≥ x)')
+    fig, ax = plt.subplots(figsize=(6.8, 4.5))
+    _apply_title(fig, title, payload.get('subtitle'))
+    _reserve_paper_margins(fig, top=0.81, bottom=0.15, left=0.12, right=0.98)
+    for i, spec in enumerate(series):
+        points = spec.get('points', [])
+        x = np.array([_safe_float(p.get('x'), np.nan) for p in points], dtype=float)
+        y = np.array([_safe_float(p.get('y'), np.nan) for p in points], dtype=float)
+        mask = np.isfinite(x) & np.isfinite(y) & (x > 0) & (y > 0)
+        x = x[mask]
+        y = y[mask]
+        if len(x) == 0:
+            continue
+        label = spec.get('label', spec.get('id', f'Series {i+1}'))
+        is_original = 'original' in str(label).lower()
+        color = '#111827' if is_original else spec.get('color', PALETTE[i % len(PALETTE)])
+        linestyle = '-' if is_original else spec.get('linestyle', LINESTYLES[(i+1) % len(LINESTYLES)])
+        ax.step(x, y, where='post', label=label, color=color, linewidth=2.3 if is_original or spec.get('emphasis') else 1.6, linestyle=linestyle, zorder=3)
+        if len(x) <= 30:
+            ax.plot(x, y, linestyle='None', marker='o', markersize=2.4, color=color, alpha=0.8, zorder=4)
+    if payload.get('log_x', True):
+        ax.set_xscale('log')
+    if payload.get('log_y', True):
+        ax.set_yscale('log')
+    _style_axes(ax, x_label=x_label, y_label=y_label, grid_axis='both')
+    ax.grid(True, which='major', axis='both', color=GRID, linestyle=':', linewidth=0.8)
+    ax.grid(True, which='minor', axis='both', color='#F1F5F9', linestyle=':', linewidth=0.5)
+    _legend_above(ax, ncol=min(max(len(series), 1), 3), y=1.07)
+    return _finalize(fig, fmt)
+
+
+def _luminance(rgb):
+    r, g, b = rgb[:3]
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _draw_graph(ax, graph_data: dict[str, Any], title: str, highlight_edges: set[str] | None = None, accent_color: str = '#0F766E', positions: dict | None = None, show_labels: bool = True):
+    g = _build_graph(graph_data)
+    if positions is None:
+        positions = _compute_layout(g)
+    degrees = dict(g.degree())
+    weights = [g[u][v].get('weight', 1.0) for u, v in g.edges()] or [1.0]
+    max_w = max(weights)
+    max_deg = max(degrees.values() or [1])
+    node_sizes = [180 + 520 * math.sqrt(max(degrees.get(n, 1), 1) / max(max_deg, 1)) for n in g.nodes()]
+    node_colors = [degrees.get(n, 0) for n in g.nodes()]
+
+    normal_edges = []
+    highlighted = []
+    edge_lookup = set(highlight_edges or [])
+
+    def edge_keys(u: str, v: str):
+        if u < v:
+            return {f'{u}--{v}', f'{u}|{v}'}
+        return {f'{v}--{u}', f'{v}|{u}'}
+
+    for u, v in g.edges():
+        if edge_lookup and edge_keys(str(u), str(v)) & edge_lookup:
+            highlighted.append((u, v))
+        else:
+            normal_edges.append((u, v))
+
+    if normal_edges:
+        nx.draw_networkx_edges(
+            g,
+            positions,
+            edgelist=normal_edges,
+            ax=ax,
+            edge_color='#8FB4AA',
+            alpha=0.55,
+            width=[0.7 + 1.7 * (g[u][v].get('weight', 1.0) / max_w) for u, v in normal_edges],
+        )
+    if highlighted:
+        nx.draw_networkx_edges(
+            g,
+            positions,
+            edgelist=highlighted,
+            ax=ax,
+            edge_color=accent_color,
+            alpha=0.92,
+            width=[1.0 + 2.6 * (g[u][v].get('weight', 1.0) / max_w) for u, v in highlighted],
+        )
+
+    nodes_artist = nx.draw_networkx_nodes(
+        g,
+        positions,
+        ax=ax,
+        node_size=node_sizes,
+        node_color=node_colors,
+        cmap=plt.cm.Blues,
+        edgecolors='#1E3A8A',
+        linewidths=0.9,
+    )
+
+    if show_labels:
+        cmap = plt.cm.Blues
+        norm = plt.Normalize(vmin=min(node_colors or [0]), vmax=max(node_colors or [1]))
+        texts = {}
+        for node in g.nodes():
+            rgba = cmap(norm(degrees.get(node, 0)))
+            color = '#FFFFFF' if _luminance(rgba) < 0.55 else '#0F172A'
+            size = degrees.get(node, 0)
+            font_size = float(np.interp(size, [min(node_colors or [0]), max(node_colors or [1]) or 1], [6.8, 10.5]))
+            texts[node] = ax.text(
+                positions[node][0],
+                positions[node][1],
+                str(node),
+                ha='center',
+                va='center',
+                fontsize=font_size,
+                fontweight='bold',
+                color=color,
+                zorder=5,
+            )
+            texts[node].set_path_effects([pe.withStroke(linewidth=1.2, foreground='white' if color != '#FFFFFF' else '#1E3A8A')])
+
+    xs = [p[0] for p in positions.values()] if positions else [0]
+    ys = [p[1] for p in positions.values()] if positions else [0]
+    if xs and ys:
+        xmin, xmax = min(xs), max(xs)
+        ymin, ymax = min(ys), max(ys)
+        xpad = max((xmax - xmin) * 0.08, 0.08)
+        ypad = max((ymax - ymin) * 0.08, 0.08)
+        ax.set_xlim(xmin - xpad, xmax + xpad)
+        ax.set_ylim(ymin - ypad, ymax + ypad)
+    ax.set_aspect('equal')
+    ax.set_axis_off()
+    return nodes_artist
+
+
+def render_graph(payload: dict[str, Any], fmt: str) -> bytes:
+    _apply_style()
+    title = payload.get('title', 'Graph')
+    graph_data = payload.get('graph', payload)
+    accent = payload.get('accent_color', '#0F766E')
+    highlight_edges = set(payload.get('highlight_edges', []) or [])
+    fig, ax = plt.subplots(figsize=(6.8, 5.2))
+    _apply_title(fig, title, payload.get('subtitle'))
+    _reserve_paper_margins(fig, top=0.90, bottom=0.03, left=0.03, right=0.97)
+    nodes_artist = _draw_graph(ax, graph_data, title=title, highlight_edges=highlight_edges, accent_color=accent, show_labels=payload.get('show_labels', True))
+    if payload.get('show_colorbar', False):
+        cbar = fig.colorbar(nodes_artist, ax=ax, fraction=0.03, pad=0.012)
+        cbar.set_label('Node degree', fontsize=8.5)
+        cbar.ax.tick_params(labelsize=8)
+    return _finalize(fig, fmt)
+
+
+def render_graph_compare(payload: dict[str, Any], fmt: str) -> bytes:
+    _apply_style()
+    left = payload['left']
+    right = payload['right']
+    left_graph = _build_graph(left.get('graph', left))
+    right_graph = _build_graph(right.get('graph', right))
+    union = nx.compose(left_graph, right_graph)
+    positions = _compute_layout(union)
+    fig, axes = plt.subplots(1, 2, figsize=(10.8, 5.2))
+    _reserve_paper_margins(fig, top=0.88, bottom=0.04, left=0.03, right=0.97)
+    n1 = _draw_graph(axes[0], left.get('graph', left), title=left.get('title', 'Left'), highlight_edges=set(left.get('highlight_edges', []) or []), accent_color=left.get('accent_color', '#0F766E'), positions=positions, show_labels=left.get('show_labels', True))
+    n2 = _draw_graph(axes[1], right.get('graph', right), title=right.get('title', 'Right'), highlight_edges=set(right.get('highlight_edges', []) or []), accent_color=right.get('accent_color', '#4338CA'), positions=positions, show_labels=right.get('show_labels', True))
+    if payload.get('title'):
+        _apply_title(fig, payload['title'], payload.get('subtitle'))
+    if payload.get('show_colorbar', False):
+        cbar = fig.colorbar(n2, ax=axes.ravel().tolist(), fraction=0.022, pad=0.015)
+        cbar.set_label('Node degree', fontsize=8.5)
+        cbar.ax.tick_params(labelsize=8)
+    return _finalize(fig, fmt)
+
+
+def render_table(payload: dict[str, Any], fmt: str) -> bytes:
+    _apply_style()
+    title = payload.get('title', 'Table')
+    rows = payload.get('rows', [])
+    columns = payload.get('columns', [])
+    if isinstance(columns, list) and columns and isinstance(columns[0], str):
+        col_keys = columns
+        col_labels = columns
+    else:
+        col_keys = [c['key'] for c in columns] if columns else []
+        col_labels = [c.get('label', c['key']) for c in columns] if columns else []
+    if not col_keys and rows:
+        col_keys = list(rows[0].keys())
+        col_labels = col_keys
+
+    wrapped_labels = [_wrap(label, 18) for label in col_labels]
+    data = [[_wrap(row.get(k, '—'), 22) for k in col_keys] for row in rows]
+
+    ncols = max(len(col_keys), 1)
+    nrows = max(len(data), 1)
+    fig_h = min(13.5, 1.5 + 0.40 * nrows)
+    fig_w = max(8.5, min(18.0, 1.25 + 1.45 * ncols))
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    _apply_title(fig, title, payload.get('subtitle'))
+    _reserve_paper_margins(fig, top=0.92, bottom=0.04, left=0.03, right=0.97)
+    ax.axis('off')
+
+    table = ax.table(cellText=data, colLabels=wrapped_labels, loc='center', cellLoc='left', colLoc='left')
+    table.auto_set_font_size(False)
+    table.set_fontsize(8.0)
+    table.scale(1.00, 1.35)
+
+    # set widths based on content length
+    lengths = [max([len(str(col_labels[i]))] + [len(str(row.get(col_keys[i], '—'))) for row in rows]) for i in range(len(col_keys))] if col_keys else [1]
+    total_len = float(sum(max(l, 6) for l in lengths))
+    for (row_idx, col_idx), cell in table.get_celld().items():
+        cell.set_edgecolor('#CBD5E1')
+        if row_idx == 0:
+            cell.visible_edges = 'TB'
+            cell.set_linewidth(0.9)
+            cell.set_facecolor('white')
+            cell.set_text_props(weight='bold', color='#111827', wrap=True)
+            cell.set_height(cell.get_height() * 1.15)
+        else:
+            cell.visible_edges = 'B'
+            cell.set_linewidth(0.45)
+            cell.set_facecolor('white')
+            cell.set_text_props(color='#111827', wrap=True)
+        if col_idx < len(lengths):
+            frac = max(lengths[col_idx], 6) / total_len
+            cell.set_width(frac * 0.98)
+    return _finalize(fig, fmt)
+
+
+def render_radar(payload: dict[str, Any], fmt: str) -> bytes:
+    _apply_style()
+    title = payload.get('title', 'Radar chart')
+    categories = payload.get('categories', [])
+    series = payload.get('series', [])
+    if not categories:
+        raise ValueError('Radar export requires categories.')
+    angles = np.linspace(0, 2 * np.pi, len(categories), endpoint=False).tolist()
+    angles += angles[:1]
+    fig, ax = plt.subplots(figsize=(6.4, 5.6), subplot_kw=dict(polar=True))
+    _apply_title(fig, title, payload.get('subtitle'))
+    _reserve_paper_margins(fig, top=0.82, bottom=0.06, left=0.05, right=0.95)
+    for i, spec in enumerate(series):
+        values = [_safe_float(v) for v in spec.get('values', [])]
+        values += values[:1]
+        color = spec.get('color', PALETTE[i % len(PALETTE)])
+        ax.plot(angles, values, linewidth=2.2, color=color, label=spec.get('label', f'Series {i+1}'))
+        ax.fill(angles, values, color=color, alpha=0.12)
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels([_wrap(c, 14) for c in categories])
+    ax.set_yticks([0.25, 0.5, 0.75, 1.0])
+    ax.set_yticklabels(['0.25', '0.50', '0.75', '1.00'])
+    ax.set_ylim(0, 1)
+    ax.grid(color=GRID, linestyle=':', linewidth=0.8)
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.10), ncol=min(len(series), 3), frameon=False)
+    return _finalize(fig, fmt)
+
+
+RENDERERS = {
+    'histogram': render_histogram,
+    'bar': render_bar,
+    'line': render_line,
+    'scatter': render_scatter,
+    'ccdf': render_ccdf,
+    'graph': render_graph,
+    'graph_compare': render_graph_compare,
+    'table': render_table,
+    'radar': render_radar,
+}
+
+
+def render_figure(figure_type: str, payload: dict[str, Any], fmt: str) -> bytes:
+    if figure_type not in RENDERERS:
+        raise ValueError(f'Unsupported figure type: {figure_type}')
+    return RENDERERS[figure_type](payload, fmt)
+
+
+def build_filename(filename: str | None, title: str | None, figure_type: str, fmt: str) -> str:
+    base = filename or title or figure_type
+    return f"{_slugify(base)}.{fmt.lower()}"

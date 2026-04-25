@@ -6,6 +6,7 @@ import {
 import { runResearchAnalysis } from '../../api/client'
 import { METHODS } from '../../constants/methods'
 import { Button } from '../ui'
+import PaperExportButton from '../export/PaperExportButton'
 import type {
   ResearchAnalysisResponse,
   ResearchNetworkId,
@@ -290,8 +291,9 @@ export default function ResearchAnalysisPanel() {
           {/* Raw distribution + notes */}
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <div className="text-sm font-semibold text-navy mb-3">
-                Raw Score Distribution
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div className="text-sm font-semibold text-navy">Raw Score Distribution</div>
+                <PaperExportButton config={{ figureType: 'histogram', title: 'Raw score distribution', filename: `${networkId}-${methodId}-raw-distribution`, payload: { title: 'Raw score distribution', subtitle: result.algorithmic_notes.design_tradeoff, bins: result.distribution.histogram.map((bin) => ({ bin_center: bin.bin_center, count: bin.count })), x_label: 'Raw score', y_label: 'Edge count', total_key: 'count', accent_color: methodColor } }} />
               </div>
               <ResponsiveContainer width="100%" height={260}>
                 <BarChart data={rawHistogram}>
@@ -395,6 +397,9 @@ export default function ResearchAnalysisPanel() {
                     />
                   </div>
 
+                  <div className="flex justify-end mb-3">
+                    <PaperExportButton config={{ figureType: 'histogram', title: `${activeExperiment?.label ?? 'Transform'} histogram`, filename: `${networkId}-${methodId}-${activeTransform}-distribution`, payload: { title: `${activeExperiment?.label ?? 'Transform'} histogram`, subtitle: activeExperiment?.description, bins: transformedHistogram.map((bin) => ({ bin_center: bin.bin, count: bin.count })), x_label: 'Transformed score', y_label: 'Edge count', total_key: 'count', accent_color: methodColor } }} />
+                  </div>
                   <ResponsiveContainer width="100%" height={240}>
                     <BarChart data={transformedHistogram}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
@@ -465,8 +470,9 @@ export default function ResearchAnalysisPanel() {
 
           {/* Cross-transform comparison */}
           <div className="bg-white rounded-2xl border border-gray-100 p-5">
-            <div className="text-sm font-semibold text-navy mb-3">
-              Backbone retention across transformations
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="text-sm font-semibold text-navy">Backbone retention across transformations</div>
+              <PaperExportButton config={{ figureType: 'bar', title: 'Backbone retention across transformations', filename: `${networkId}-${methodId}-retention-comparison`, payload: { title: 'Backbone retention across transformations', subtitle: 'Percentage of edges retained in the extracted backbone for each preprocessing choice.', rows: backbonePctData.map((row) => ({ transform: row.transform, backbone_pct: row.pct_backbone })), x_key: 'transform', series: [{ key: 'backbone_pct', label: 'Backbone %', color: methodColor }], y_axis_label: 'Backbone %', x_rotation: 0 } }} />
             </div>
 
             <ResponsiveContainer width="100%" height={280}>
@@ -483,6 +489,16 @@ export default function ResearchAnalysisPanel() {
 
           {/* Comparison table */}
           <div className="bg-white rounded-2xl border border-gray-100 overflow-x-auto">
+            <div className="flex justify-end p-4 pb-0">
+              <PaperExportButton config={{ figureType: 'table', title: 'Transformation comparison table', filename: `${networkId}-${methodId}-transform-table`, payload: { title: 'Transformation comparison table', subtitle: 'Backbone summary for each preprocessing option.', columns: [
+                { key: 'Transformation', label: 'Transformation' },
+                { key: 'Skewness', label: 'Skewness' },
+                { key: 'Backbone %', label: 'Backbone %' },
+                { key: 'Components', label: 'Components' },
+                { key: 'Jaccard vs raw', label: 'Jaccard vs raw' },
+                { key: 'Status', label: 'Status' },
+              ], rows: transformRows.map((row) => ({ 'Transformation': row.label, 'Skewness': row.transformed_stats?.skewness ?? '—', 'Backbone %': row.backbone ? `${row.backbone.pct_backbone}%` : '—', 'Components': row.backbone?.component_count ?? '—', 'Jaccard vs raw': row.backbone?.jaccard_vs_raw ?? '—', 'Status': row.error ? row.error : 'OK' })) } }} />
+            </div>
             <table className="min-w-full text-sm">
               <thead className="bg-gray-50 text-gray-500">
                 <tr>

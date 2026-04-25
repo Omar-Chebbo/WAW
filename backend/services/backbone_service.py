@@ -58,7 +58,7 @@ def extract_backbone(session_id: str, method_id: str) -> dict:
 
     out_path = backbone_dir / f"{method_id}.json"
     with open(out_path, "w") as f:
-        json.dump(graph_to_json(backbone), f)
+        json.dump(graph_to_json(backbone, max_edges=None), f)
 
     orig_edges = len(original.edges())
     back_edges = len(backbone.edges())

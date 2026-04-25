@@ -12,7 +12,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { runContaminationExperiment, useDatasets } from '../../api/client'
+import { fetchScoreStatus, runContaminationExperiment, useDatasets } from '../../api/client'
 import { METHODS } from '../../constants/methods'
 import { useWorkflowStore } from '../../store/workflowStore'
 import {
@@ -25,8 +25,10 @@ import type {
   ContaminationScoreSource,
   MethodId,
   PreprocessingMode,
+  ScoreCacheStatusResponse,
 } from '../../types'
 import { Button } from '../ui'
+import PaperExportButton from '../export/PaperExportButton'
 import ScoreInspectorSection from '../lab/ScoreInspectorSection'
 import ContaminationGraphDiffPanel from './ContaminationGraphDiffPanel'
 
@@ -42,14 +44,19 @@ const PREPROCESSING_OPTIONS: { id: PreprocessingMode; label: string }[] = [
 
 const SCORE_SOURCE_OPTIONS: { id: ContaminationScoreSource; label: string; description: string }[] = [
   {
-    id: 'compute_fresh',
-    label: 'Compute fresh from dataset',
-    description: 'Independent from the wizard. Recomputes the selected PA/LP or PA+LP score directly from the dataset.',
+    id: 'auto',
+    label: 'Auto reuse saved scores',
+    description: 'Checks the dataset-level cache first. Missing scores are computed once and then saved for future runs.',
   },
   {
     id: 'session_scores',
     label: 'Use current session score file',
-    description: 'Reuses the score CSV from your current session if that method has already been computed.',
+    description: 'Reuses the score CSV already generated inside your current wizard session.',
+  },
+  {
+    id: 'recompute',
+    label: 'Force recompute',
+    description: 'Recalculates the score from scratch and replaces the saved dataset-level score cache.',
   },
 ]
 
@@ -155,7 +162,8 @@ export default function ContaminationExperimentPanel() {
     datasetOptions[0] ?? null
   )
   const [methodId, setMethodId] = useState<MethodId>('pa')
-  const [scoreSource, setScoreSource] = useState<ContaminationScoreSource>('compute_fresh')
+  const [scoreSource, setScoreSource] = useState<ContaminationScoreSource>('auto')
+  const [cacheStatus, setCacheStatus] = useState<ScoreCacheStatusResponse | null>(null)
   const [preprocessingMode, setPreprocessingMode] = useState<PreprocessingMode>('none')
 
   const [draftValue, setDraftValue] = useState('0.10')
@@ -175,6 +183,26 @@ export default function ContaminationExperimentPanel() {
       setDatasetSelection(datasetOptions[0])
     }
   }, [datasetOptions, datasetSelection])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadCacheStatus() {
+      if (!datasetSelection) {
+        setCacheStatus(null)
+        return
+      }
+      try {
+        const data = await fetchScoreStatus(datasetSelection.id, ['pa', 'lp', 'pa_lp'], datasetSelection.isCustom)
+        if (!cancelled) setCacheStatus(data)
+      } catch {
+        if (!cancelled) setCacheStatus(null)
+      }
+    }
+    loadCacheStatus()
+    return () => {
+      cancelled = true
+    }
+  }, [datasetSelection])
 
   const safeStep = useMemo(() => {
     const parsed = Number(stepValue)
@@ -421,8 +449,11 @@ export default function ContaminationExperimentPanel() {
           </div>
 
           <div>
+            <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600 mb-3">
+              Saved score status for this dataset: <strong>PA</strong> {cacheStatus?.methods?.pa?.status ?? 'missing'}, <strong>LP</strong> {cacheStatus?.methods?.lp?.status ?? 'missing'}, <strong>PA+LP</strong> {cacheStatus?.methods?.pa_lp?.status ?? 'missing'}.
+            </div>
             <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Score source</div>
-            <div className="grid md:grid-cols-2 gap-3">
+            <div className="grid md:grid-cols-3 gap-3">
               {SCORE_SOURCE_OPTIONS.map((option) => (
                 <button
                   key={option.id}
@@ -567,7 +598,7 @@ export default function ContaminationExperimentPanel() {
           <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-4">
             <ExperimentMiniStat label="Dataset" value={selectedExperiment.dataset_label} />
             <ExperimentMiniStat label="Method" value={selectedExperiment.method_label} />
-            <ExperimentMiniStat label="Score source" value={selectedExperiment.score_source} />
+            <ExperimentMiniStat label="Score source" value={selectedExperiment.score_source_used ?? selectedExperiment.score_source} />
             <ExperimentMiniStat label="Preprocessing" value={selectedExperiment.preprocessing_used} sub="raw is the default baseline" />
             <ExperimentMiniStat label="History selection" value={latestExperimentLabel} />
           </div>
@@ -599,6 +630,18 @@ export default function ContaminationExperimentPanel() {
               </div>
             </div>
 
+            <div className="flex justify-end mb-3">
+              <PaperExportButton config={{ figureType: 'table', title: 'Contamination summary table', filename: `${selectedExperiment.dataset_id}-${selectedExperiment.method_id}-contamination-summary`, payload: { title: 'Contamination summary table', subtitle: `Baseline: ${baselineDisplayLabel}`, columns: [
+                { key: 'Backbone %', label: 'Backbone %' },
+                { key: 'Cutoff rank', label: 'Cutoff rank' },
+                { key: 'Flagged edges', label: 'Flagged edges' },
+                { key: 'Edge fraction', label: 'Edge fraction' },
+                { key: 'Node fraction', label: 'Node fraction' },
+                { key: 'Reachability', label: 'Reachability' },
+                { key: 'Connected components', label: 'Connected components' },
+                { key: 'Jaccard vs baseline', label: 'Jaccard vs baseline' },
+              ], rows: summaryRows.map((row) => ({ 'Backbone %': row.contamination, 'Cutoff rank': row.cutoff_rank ?? '—', 'Flagged edges': row.flagged_edges, 'Edge fraction': formatNumber(row.edge_fraction, 4), 'Node fraction': formatNumber(row.node_fraction, 4), 'Reachability': formatNumber(row.reachability, 4), 'Connected components': row.connected_components, 'Jaccard vs baseline': formatNumber(row.jaccard_vs_baseline, 4) })) } }} />
+            </div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead>
@@ -633,7 +676,7 @@ export default function ContaminationExperimentPanel() {
 
           <div className="grid xl:grid-cols-2 gap-6">
             <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-              <div className="text-sm font-semibold text-navy mb-3">1. Backbone % vs backbone size</div>
+              <div className="flex items-center justify-between gap-3 mb-3"><div className="text-sm font-semibold text-navy">1. Backbone % vs backbone size</div><PaperExportButton config={{ figureType: 'line', title: 'Backbone % vs backbone size', filename: `${selectedExperiment.dataset_id}-${selectedExperiment.method_id}-backbone-pct-vs-backbone-size`, payload: { title: 'Backbone % vs backbone size', subtitle: `Method: ${selectedExperiment.method_label} · baseline: ${baselineDisplayLabel}`, rows: chartData, x_key: 'contamination', x_label: 'Backbone size / edge fraction', y_label: 'Backbone %', series: [{ key: 'flagged_edges', label: 'Flagged edges', color: activeMethodColor }, { key: 'edge_fraction', label: 'Edge fraction', color: '#111827' }] } } } /></div>
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -648,7 +691,7 @@ export default function ContaminationExperimentPanel() {
             </div>
 
             <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-              <div className="text-sm font-semibold text-navy mb-3">2. Backbone % vs node fraction</div>
+              <div className="flex items-center justify-between gap-3 mb-3"><div className="text-sm font-semibold text-navy">2. Backbone % vs node fraction</div><PaperExportButton config={{ figureType: 'line', title: 'Backbone % vs node fraction', filename: `${selectedExperiment.dataset_id}-${selectedExperiment.method_id}-backbone-pct-vs-node-fraction`, payload: { title: 'Backbone % vs node fraction', subtitle: `Method: ${selectedExperiment.method_label} · baseline: ${baselineDisplayLabel}`, rows: chartData, x_key: 'contamination', x_label: 'Node fraction', y_label: 'Backbone %', series: [{ key: 'node_fraction', label: 'Node fraction', color: activeMethodColor }] } } } /></div>
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -661,7 +704,7 @@ export default function ContaminationExperimentPanel() {
             </div>
 
             <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-              <div className="text-sm font-semibold text-navy mb-3">3. Backbone % vs reachability</div>
+              <div className="flex items-center justify-between gap-3 mb-3"><div className="text-sm font-semibold text-navy">3. Backbone % vs reachability</div><PaperExportButton config={{ figureType: 'line', title: 'Backbone % vs reachability', filename: `${selectedExperiment.dataset_id}-${selectedExperiment.method_id}-backbone-pct-vs-reachability`, payload: { title: 'Backbone % vs reachability', subtitle: `Method: ${selectedExperiment.method_label} · baseline: ${baselineDisplayLabel}`, rows: chartData, x_key: 'contamination', x_label: 'Reachability', y_label: 'Backbone %', series: [{ key: 'reachability', label: 'Reachability', color: activeMethodColor }] } } } /></div>
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -674,7 +717,7 @@ export default function ContaminationExperimentPanel() {
             </div>
 
             <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-              <div className="text-sm font-semibold text-navy mb-3">4. Backbone % vs connected components</div>
+              <div className="flex items-center justify-between gap-3 mb-3"><div className="text-sm font-semibold text-navy">4. Backbone % vs connected components</div><PaperExportButton config={{ figureType: 'line', title: 'Backbone % vs connected components', filename: `${selectedExperiment.dataset_id}-${selectedExperiment.method_id}-backbone-pct-vs-connected-components`, payload: { title: 'Backbone % vs connected components', subtitle: `Method: ${selectedExperiment.method_label} · baseline: ${baselineDisplayLabel}`, rows: chartData, x_key: 'contamination', x_label: 'Connected components', y_label: 'Backbone %', series: [{ key: 'connected_components', label: 'Connected components', color: activeMethodColor }] } } } /></div>
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -687,7 +730,7 @@ export default function ContaminationExperimentPanel() {
             </div>
 
             <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-              <div className="text-sm font-semibold text-navy mb-3">5. Jaccard similarity vs contamination</div>
+              <div className="flex items-center justify-between gap-3 mb-3"><div className="text-sm font-semibold text-navy">5. Jaccard similarity vs contamination</div><PaperExportButton config={{ figureType: 'line', title: 'Jaccard similarity vs contamination', filename: `${selectedExperiment.dataset_id}-${selectedExperiment.method_id}-jaccard-similarity-vs-contamination`, payload: { title: 'Jaccard similarity vs contamination', subtitle: `Method: ${selectedExperiment.method_label} · baseline: ${baselineDisplayLabel}`, rows: chartData, x_key: 'contamination', x_label: 'Jaccard similarity', y_label: 'Backbone %', series: [{ key: 'jaccard_vs_baseline', label: 'Jaccard vs baseline', color: activeMethodColor }] } } } /></div>
               <div className="text-xs text-gray-500 mb-3">Baseline: {baselineDisplayLabel}</div>
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={chartData}>
@@ -701,7 +744,7 @@ export default function ContaminationExperimentPanel() {
             </div>
 
             <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-              <div className="text-sm font-semibold text-navy mb-3">6. Cutoff rank vs backbone %</div>
+              <div className="flex items-center justify-between gap-3 mb-3"><div className="text-sm font-semibold text-navy">6. Cutoff rank vs backbone %</div><PaperExportButton config={{ figureType: 'line', title: 'Cutoff rank vs backbone %', filename: `${selectedExperiment.dataset_id}-${selectedExperiment.method_id}-cutoff-rank-vs-backbone-pct`, payload: { title: 'Cutoff rank vs backbone %', subtitle: `Method: ${selectedExperiment.method_label} · baseline: ${baselineDisplayLabel}`, rows: chartData, x_key: 'contamination', x_label: 'Cutoff rank', y_label: 'Backbone %', series: [{ key: 'cutoff_rank', label: 'Cutoff rank / selected top-k', color: activeMethodColor }] } } } /></div>
               <div className="text-xs text-gray-500 mb-3">
                 The plotted cutoff rank is how deep the app cuts into the sorted anomaly ranking. For 0.25 it keeps roughly the top 25% edges.
               </div>
@@ -719,7 +762,7 @@ export default function ContaminationExperimentPanel() {
           </div>
 
           <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-            <div className="text-sm font-semibold text-navy mb-3">7. Delta chart between consecutive runs</div>
+            <div className="flex items-center justify-between gap-3 mb-3"><div className="text-sm font-semibold text-navy">7. Delta chart between consecutive runs</div><PaperExportButton config={{ figureType: 'bar', title: 'Delta chart between consecutive runs', filename: `${selectedExperiment.dataset_id}-${selectedExperiment.method_id}-delta-runs`, payload: { title: 'Delta chart between consecutive runs', subtitle: 'How many edges were kept, added, or removed between consecutive contamination values.', rows: deltaRows, x_key: 'transition', series: [ { key: 'added', label: 'Added edges', color: activeMethodColor }, { key: 'removed', label: 'Removed edges', color: '#BA7517' }, { key: 'kept', label: 'Kept edges', color: '#111827' } ], y_axis_label: 'Edge count' } }} /></div>
             <div className="text-xs text-gray-500 mb-3">This shows whether the next contamination value mostly adds a few edges or actually changes backbone identity.</div>
             <ResponsiveContainer width="100%" height={320}>
               <BarChart data={deltaRows}>

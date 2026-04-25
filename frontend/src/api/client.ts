@@ -24,6 +24,8 @@ import type {
   MultiFeatureScalingMode,
   IterativeExtractionResponse,
   IterativeMethodId,
+  ScoreCacheStatusResponse,
+  ScoreStrategy,
 } from '../types'
 
 const api = axios.create({ baseURL: '/api' })
@@ -53,11 +55,29 @@ export const uploadDataset = (file: File) => {
 
 // ── Scores ────────────────────────────────────────────────────────
 export const triggerCompute = (
-  sessionId: string, datasetId: string, methodIds: string[], isCustom = false
+  sessionId: string,
+  datasetId: string,
+  methodIds: string[],
+  isCustom = false,
+  scoreStrategy: ScoreStrategy = 'auto'
 ) =>
   api.post('/scores/compute', {
-    session_id: sessionId, dataset_id: datasetId,
-    method_ids: methodIds, is_custom: isCustom
+    session_id: sessionId,
+    dataset_id: datasetId,
+    method_ids: methodIds,
+    is_custom: isCustom,
+    score_strategy: scoreStrategy,
+  }).then(r => r.data)
+
+export const fetchScoreStatus = (
+  datasetId: string,
+  methodIds: string[],
+  isCustom = false,
+) =>
+  api.post<ScoreCacheStatusResponse>('/scores/status', {
+    dataset_id: datasetId,
+    method_ids: methodIds,
+    is_custom: isCustom,
   }).then(r => r.data)
 
 export const checkScoresExist = (sessionId: string, methodId: string) =>
@@ -159,7 +179,7 @@ export const runContaminationExperiment = (params: {
     method_id: params.methodId,
     contamination_values: params.contaminationValues,
     preprocessing_mode: params.preprocessingMode ?? 'none',
-    score_source: params.scoreSource ?? 'compute_fresh',
+    score_source: params.scoreSource ?? 'auto',
     session_id: params.sessionId ?? null,
     is_custom: params.isCustom ?? false,
   }).then(r => r.data)
@@ -176,7 +196,7 @@ export const runMultiFeatureExperiment = (params: {
   api.post<MultiFeatureExperimentResponse>('/research/multi-feature', {
     dataset_id: params.datasetId,
     contamination: params.contamination ?? null,
-    score_source: params.scoreSource ?? 'compute_fresh',
+    score_source: params.scoreSource ?? 'auto',
     session_id: params.sessionId ?? null,
     is_custom: params.isCustom ?? false,
     scaling_mode: params.scalingMode ?? 'none',
@@ -212,7 +232,7 @@ export const runIterativeExtractionExperiment = (params: {
     stage_percents: params.stagePercents,
     low_region_percent: params.lowRegionPercent ?? 10,
     high_region_percent: params.highRegionPercent ?? 10,
-    score_source: params.scoreSource ?? 'compute_fresh',
+    score_source: params.scoreSource ?? 'auto',
     session_id: params.sessionId ?? null,
     is_custom: params.isCustom ?? false,
   }).then(r => r.data)

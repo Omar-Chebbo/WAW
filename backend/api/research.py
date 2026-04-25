@@ -28,7 +28,7 @@ class ContaminationExperimentRequest(BaseModel):
     method_id: str
     contamination_values: list[str] = Field(default_factory=list)
     preprocessing_mode: str | None = "none"
-    score_source: str = "compute_fresh"
+    score_source: str = "auto"
     session_id: str | None = None
     is_custom: bool = False
 
@@ -40,7 +40,7 @@ class IterativeExtractionRequest(BaseModel):
     stage_percents: list[float] = Field(default_factory=lambda: [10.0, 10.0])
     low_region_percent: float = 10.0
     high_region_percent: float = 10.0
-    score_source: str = "compute_fresh"
+    score_source: str = "auto"
     session_id: str | None = None
     is_custom: bool = False
 
@@ -48,7 +48,7 @@ class IterativeExtractionRequest(BaseModel):
 class MultiFeatureExperimentRequest(BaseModel):
     dataset_id: str
     contamination: float | None = None
-    score_source: str = "compute_fresh"
+    score_source: str = "auto"
     session_id: str | None = None
     is_custom: bool = False
     scaling_mode: str = "none"

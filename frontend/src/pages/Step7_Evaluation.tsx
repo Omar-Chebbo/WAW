@@ -18,7 +18,7 @@ import { METHODS } from '../constants/methods'
 import { StepCard, Button } from '../components/ui'
 
 import type { EvaluationReport, DistributionReport } from '../types'
-import { downloadPngByContainerId, downloadSvgByContainerId } from '../utils/svgExport'
+import PaperExportButton from '../components/export/PaperExportButton'
 
 // Deviation → badge colour
 function deviationColour(d: number) {
@@ -186,34 +186,22 @@ function DistributionPanel({
           <h3 className="text-sm font-semibold text-navy">
             Node Degree Distribution (CCDF)
           </h3>
-            <div className="flex gap-2">
-  <button
-    onClick={() =>
-      downloadSvgByContainerId(
-        'chart-weight',
-        `weight-distribution-${sessionId}.svg`
-      )
-    }
-    className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
-               hover:bg-gray-50 text-gray-600 font-medium"
-  >
-    ⬇ SVG
-  </button>
-
-  <button
-    onClick={() =>
-      void downloadPngByContainerId(
-        'chart-weight',
-        `weight-distribution-${sessionId}.png`,
-        4
-      )
-    }
-    className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
-               hover:bg-gray-50 text-gray-600 font-medium"
-  >
-    ⬇ PNG 4x
-  </button>
-</div>
+          <PaperExportButton
+            config={{
+              figureType: 'ccdf',
+              title: 'Node degree distribution (CCDF)',
+              filename: `degree-distribution-${sessionId}`,
+              payload: {
+                title: 'Node degree distribution (CCDF)',
+                subtitle: 'Lower KS means the backbone degree distribution is closer to the original.',
+                series: degreeLines.map((l) => ({ id: l.id, label: l.id === 'original' ? 'Original' : l.id, color: l.color, points: l.points, emphasis: l.id === 'original', linestyle: l.id === 'original' ? '-' : '--' })),
+                x_label: 'Degree',
+                y_label: 'P(D ≥ d)',
+                log_x: true,
+                log_y: true,
+              },
+            }}
+          />
         </div>
         <div id="chart-degree">
           <ResponsiveContainer width="100%" height={280}>
@@ -281,34 +269,22 @@ function DistributionPanel({
           <h3 className="text-sm font-semibold text-navy">
             Edge Weight Distribution (CCDF)
           </h3>
-          <div className="flex gap-2">
-  <button
-    onClick={() =>
-      downloadSvgByContainerId(
-        'chart-degree',
-        `degree-distribution-${sessionId}.svg`
-      )
-    }
-    className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
-               hover:bg-gray-50 text-gray-600 font-medium"
-  >
-    ⬇ SVG
-  </button>
-
-  <button
-    onClick={() =>
-      void downloadPngByContainerId(
-        'chart-degree',
-        `degree-distribution-${sessionId}.png`,
-        4
-      )
-    }
-    className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
-               hover:bg-gray-50 text-gray-600 font-medium"
-  >
-    ⬇ PNG 4x
-  </button>
-</div>
+          <PaperExportButton
+            config={{
+              figureType: 'ccdf',
+              title: 'Edge weight distribution (CCDF)',
+              filename: `weight-distribution-${sessionId}`,
+              payload: {
+                title: 'Edge weight distribution (CCDF)',
+                subtitle: 'Lower KS means the backbone weight distribution is closer to the original.',
+                series: weightLines.map((l) => ({ id: l.id, label: l.id === 'original' ? 'Original' : l.id, color: l.color, points: l.points, emphasis: l.id === 'original', linestyle: l.id === 'original' ? '-' : '--' })),
+                x_label: 'Weight',
+                y_label: 'P(W ≥ w)',
+                log_x: true,
+                log_y: true,
+              },
+            }}
+          />
         </div>
         <div id="chart-weight">
           <ResponsiveContainer width="100%" height={280}>
@@ -529,10 +505,36 @@ const [error,     setError]     = useState<string | null>(null)
           {/* TABLE VIEW — matches paper Table 2 format */}
 {viewMode === 'table' && (
   <div className="overflow-x-auto">
-   <div className="flex items-center justify-between mb-3">
+   <div className="flex items-center justify-between mb-3 gap-3">
   <span className="text-xs text-gray-400">
     Topological properties of extracted backbones 
   </span>
+  <PaperExportButton
+    config={{
+      figureType: 'table',
+      title: 'Evaluation table',
+      filename: `evaluation-table-${sessionId}`,
+      payload: {
+        title: 'Topological properties of extracted backbones',
+        subtitle: 'Value metrics are shown directly. Deviation metrics are relative to the original graph.',
+        columns: [
+          { key: 'property', label: 'Property' },
+          ...selectedMethods.map((id) => ({ key: id, label: METHODS.find((x) => x.id === id)?.short ?? id.toUpperCase() })),
+        ],
+        rows: metricsList.filter((m) => selectedMetrics.has(m.id)).map((metric) => {
+          const displayType = METRIC_DISPLAY_TYPE[metric.id] ?? 'value'
+          const row: Record<string, string> = { property: metric.label }
+          selectedMethods.forEach((sid) => {
+            const r = report[sid]?.[metric.id]
+            if (!r) { row[sid] = '—'; return }
+            const displayNum = displayType === 'deviation' ? r.deviation : r.value
+            row[sid] = metric.id === 'num_components' ? `${Math.round(displayNum)}` : displayNum.toFixed(2)
+          })
+          return row
+        }),
+      },
+    }}
+  />
 </div>
     <div id="eval-table">
       <table className="w-full text-sm border-collapse">
@@ -609,34 +611,25 @@ const [error,     setError]     = useState<string | null>(null)
           {/* RADAR VIEW */}
             {viewMode === 'radar' && radarData.length > 0 && (
               <div>
-                <div className="flex justify-end mb-2 gap-2">
-  <button
-    onClick={() =>
-      downloadSvgByContainerId(
-        'chart-radar',
-        `radar-chart-${sessionId}.svg`
-      )
-    }
-    className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
-              hover:bg-gray-50 text-gray-600 font-medium"
-  >
-    ⬇ SVG
-  </button>
-
-  <button
-    onClick={() =>
-      void downloadPngByContainerId(
-        'chart-radar',
-        `radar-chart-${sessionId}.png`,
-        4
-      )
-    }
-    className="px-2 py-1 text-xs bg-white border border-gray-200 rounded shadow-sm
-              hover:bg-gray-50 text-gray-600 font-medium"
-  >
-    ⬇ PNG 4x
-  </button>
-</div>
+                <div className="flex justify-end mb-2">
+                  <PaperExportButton
+                    config={{
+                      figureType: 'radar',
+                      title: 'Evaluation radar chart',
+                      filename: `radar-chart-${sessionId}`,
+                      payload: {
+                        title: 'Evaluation radar chart',
+                        subtitle: 'Metrics normalised to [0,1] for visual comparison only.',
+                        categories: radarData.map((d) => String(d.metric)),
+                        series: selectedMethods.map((sid, i) => ({
+                          label: METHODS.find((x) => x.id === sid)?.short ?? sid,
+                          color: RADAR_COLORS[i] ?? '#999999',
+                          values: radarData.map((d) => Number(d[sid] ?? 0)),
+                        })),
+                      },
+                    }}
+                  />
+                </div>
                 <div id="chart-radar">
                 <ResponsiveContainer width="100%" height={400}>
                 <RadarChart data={radarData}>
