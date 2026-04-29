@@ -229,6 +229,13 @@ export default function AnomalyLabelingWorkspace({
         const control = getControl(method.id)
         const applied = appliedStates[method.id] ?? { mode: 'manual' as ControlMode, contamination: 0.1 }
 
+        const isDirectThreshold = method.selection_method === 'direct_high' || method.selection_method === 'direct_low'
+        // Direct threshold methods don't need preprocessing — they always use raw scores
+        const preprocessingReady = isDirectThreshold || !!selectedPreprocessing
+        const loadingLabel = isDirectThreshold
+          ? `Running Direct Thresholding (${method.short})…`
+          : 'Running Isolation Forest…'
+
         return (
           <div key={method.id}>
             {isLoading && (
@@ -248,11 +255,11 @@ export default function AnomalyLabelingWorkspace({
                     d="M4 12a8 8 0 018-8v8z"
                   />
                 </svg>
-                <span>Running Isolation Forest…</span>
+                <span>{loadingLabel}</span>
               </div>
             )}
 
-            {!selectedPreprocessing && !isLoading && (
+            {!preprocessingReady && !isLoading && (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 mb-4">
                 <div className="text-sm font-semibold text-amber-800 mb-1">
                   Preprocessing not selected yet
@@ -263,12 +270,13 @@ export default function AnomalyLabelingWorkspace({
               </div>
             )}
 
-            {!isLoading && selectedPreprocessing && (
+            {!isLoading && preprocessingReady && (
               <ContaminationControl
                 mode={control.mode}
                 appliedMode={applied.mode}
                 draftValue={control.draftValue}
                 appliedValue={applied.contamination}
+                selectionMethod={method.selection_method}
                 onModeChange={(newMode) => updateControl(method.id, { mode: newMode })}
                 onDraftChange={(newValue) => updateControl(method.id, { draftValue: newValue })}
                 onApply={() => applyIsolationForestRun(method.id)}

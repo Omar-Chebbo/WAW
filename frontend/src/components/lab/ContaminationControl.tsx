@@ -9,6 +9,7 @@ interface Props {
   appliedValue?: number | null
   disabled?: boolean
   defaultManualValue?: number
+  selectionMethod?: string | null
   onModeChange: (mode: ControlMode) => void
   onDraftChange: (value: number) => void
   onApply: () => void
@@ -26,6 +27,7 @@ export default function ContaminationControl({
   appliedValue,
   disabled = false,
   defaultManualValue = 0.1,
+  selectionMethod = null,
   onModeChange,
   onDraftChange,
   onApply,
@@ -80,11 +82,14 @@ export default function ContaminationControl({
 Backbone Percentage Control
           </div>
           <p className="text-xs text-gray-500 leading-5 max-w-3xl">
-            Choose the percentage of the sorted Isolation Forest anomaly ranking to keep as the backbone.
-            Nothing reruns until you press <strong>Apply</strong>.
+            {selectionMethod === 'direct_high'
+              ? 'Sort edges by score descending and keep the top X% as the backbone. Nothing reruns until you press Apply.'
+              : selectionMethod === 'direct_low'
+              ? 'Sort edges by score ascending and keep the bottom X% as the backbone. Nothing reruns until you press Apply.'
+              : 'Choose the percentage of the sorted Isolation Forest anomaly ranking to keep as the backbone. Nothing reruns until you press <strong>Apply</strong>.'}
           </p>
           <p className="text-xs text-amber-700 mt-2">
-            Valid range: <strong>(0, 1]</strong>. Example: <strong>0.25</strong> keeps the top 25% most anomalous edges.
+            Valid range: <strong>(0, 1]</strong>. Example: <strong>0.25</strong> keeps {selectionMethod === 'direct_low' ? 'the bottom 25%' : 'the top 25%'}{selectionMethod ? '' : ' most anomalous'} edges.
           </p>
         </div>
 
@@ -104,7 +109,11 @@ Backbone Percentage Control
         <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
           <div className="text-xs font-semibold text-gray-700 mb-3">Selection rule</div>
           <div className="text-sm text-gray-600 leading-5">
-            Isolation Forest ranks all edges once. The value below chooses how many top-ranked edges become the backbone.
+            {selectionMethod === 'direct_high'
+              ? 'Direct threshold: edges are sorted by score descending. The top X% become the backbone.'
+              : selectionMethod === 'direct_low'
+              ? 'Direct threshold: edges are sorted by score ascending. The bottom X% become the backbone.'
+              : 'Isolation Forest ranks all edges once. The value below chooses how many top-ranked edges become the backbone.'}
           </div>
         </div>
 

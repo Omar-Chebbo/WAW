@@ -37,16 +37,16 @@ SUPPORTED_METHODS = ("pa", "lp", "pa_lp")
 
 METHOD_META = {
     "pa": {
-        "label": "Preferential Attachment",
-        "short": "PA",
+        "label": "Preferential Attachment + IF",
+        "short": "PA+IF",
         "features": [PA_COLUMN],
         "primary_score": PA_COLUMN,
         "score_label": "PA score",
         "color": "#4F46E5",
     },
     "lp": {
-        "label": "Local Path Index",
-        "short": "LP",
+        "label": "Local Path Index + IF",
+        "short": "LP+IF",
         "features": [LP_COLUMN],
         "primary_score": LP_COLUMN,
         "score_label": "LP score",

@@ -176,8 +176,17 @@ def get_cache_status(dataset_path: Path, method_ids: list[str]) -> dict[str, Any
                     components_available.append(component)
             can_build_from_components = len(components_available) == 2
 
+        # Direct threshold methods derive from base method scores
+        derives_from = METHOD_REGISTRY.get(method_id, {}).get("derives_from")
+        if not can_build_from_components and derives_from:
+            base_path = cache_dir / f"{derives_from}.csv"
+            base_meta = meta.get("methods", {}).get(derives_from, {}) if meta_valid else {}
+            if meta_valid and base_path.exists() and base_meta:
+                components_available = [derives_from]
+                can_build_from_components = True
+
         status = "cached" if direct_cached else "missing"
-        if method_id == "pa_lp" and not direct_cached and can_build_from_components:
+        if not direct_cached and can_build_from_components:
             status = "derivable"
 
         methods[method_id] = {

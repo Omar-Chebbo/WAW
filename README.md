@@ -11,6 +11,7 @@ Built on top of the WAW2025 research codebase.
 - Python 3.10+
 - Node.js 18+
 - [uv](https://docs.astral.sh/uv/) (recommended package manager)
+- Optional but recommended for large Step 6 networks: Graphviz installed on your system and available in PATH. Step 6 will use Graphviz `sfdp` when available to create clearer layouts for large non-geographic networks. If Graphviz is missing, the app falls back to a deterministic NetworkX layout.
 
 ---
 
@@ -94,7 +95,7 @@ app/
 | 3 | **Score Computation** — real-time progress bars via WebSocket |
 | 4 | **Anomaly Labeling** — Isolation Forest ranking with adjustable backbone percentage slider |
 | 5 | **Backbone Extraction** — node/edge retention statistics |
-| 6 | **Visual Comparison** — interactive D3 graphs, side-by-side or overlay |
+| 6 | **Visual Comparison** — full unsampled comparison with one-panel toggle: score extremes (lowest 20% blue, highest 20% red) or Isolation Forest backbone overlay (purple), using the same node positions |
 | 7 | **Evaluation** — metrics table + radar chart, CSV export |
 
 ---
@@ -136,3 +137,12 @@ For PA, LP, and PA+LP anomaly-based methods, the app now:
 4. keeps the top `contamination × |E|` edges as the backbone.
 
 Example: `0.25` keeps approximately the top 25% most anomalous edges. The old Isolation Forest threshold / `predict()` cutoff is no longer used to choose backbone edges.
+
+## Step 6 visualization update
+
+The Step 6 visualization now uses the full selected network instead of the Step 1 preview sample. For each ready method, the app loads one shared layout and reuses it for two toggle views:
+
+1. **Score extremes**: all original edges are shown in black, the lowest 20% of the selected method score are blue, and the highest 20% are red.
+2. **IF backbone**: all original edges are shown in black, and the Isolation Forest selected backbone edges are purple.
+
+The export button exports the currently selected view separately as a high-quality PDF, SVG, or 600 dpi PNG. This avoids forcing the original and backbone views into one crowded figure.

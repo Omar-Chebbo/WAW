@@ -1,25 +1,23 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useWorkflowStore } from '../../store/workflowStore'
-import { fetchDatasetPreview, fetchBackbone } from '../../api/client'
+import { fetchVisualComparison } from '../../api/client'
 import { GraphCanvas } from '../graph/GraphCanvas'
 import { METHODS } from '../../constants/methods'
 import { Button } from '../ui'
 import PaperExportButton from '../export/PaperExportButton'
-import type { GraphData } from '../../types'
+import type { VisualComparisonResponse } from '../../types'
 
 type WorkspaceMode = 'wizard' | 'lab'
+type ComparisonView = 'score' | 'if'
 
 interface Props {
   mode?: WorkspaceMode
 }
 
-export default function VisualizationWorkspace({
-  mode = 'wizard',
-}: Props) {
+export default function VisualizationWorkspace({ mode = 'wizard' }: Props) {
   const {
     sessionId,
     datasetId,
-    isCustomDataset,
     selectedMethods,
     backbonesReady,
     goToStep,
@@ -28,53 +26,38 @@ export default function VisualizationWorkspace({
 
   const readyMethods = selectedMethods.filter((id) => backbonesReady[id])
   const [activeMethod, setActiveMethod] = useState(readyMethods[0] ?? '')
-  const [viewMode, setViewMode] = useState<'side' | 'overlay'>('side')
-  const [original, setOriginal] = useState<GraphData | null>(null)
-  const [backbone, setBackbone] = useState<GraphData | null>(null)
+  const [viewMode, setViewMode] = useState<ComparisonView>('score')
+  const [comparison, setComparison] = useState<VisualComparisonResponse | null>(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (readyMethods.length === 0) {
       setActiveMethod('')
       return
     }
-
     if (!readyMethods.includes(activeMethod)) {
       setActiveMethod(readyMethods[0])
     }
   }, [readyMethods, activeMethod])
 
-  const backboneEdgeSet = useMemo(() => {
-    if (!backbone) return undefined
-
-    const s = new Set<string>()
-    backbone.links.forEach((l) => {
-      const src = typeof l.source === 'object' ? (l.source as any).id : String(l.source)
-      const tgt = typeof l.target === 'object' ? (l.target as any).id : String(l.target)
-      const key = src < tgt ? `${src}--${tgt}` : `${tgt}--${src}`
-      s.add(key)
-    })
-    return s
-  }, [backbone])
-
   useEffect(() => {
-    if (!activeMethod || !datasetId || !sessionId) return
+    if (!activeMethod || !sessionId) return
 
     setLoading(true)
-
-    Promise.all([
-      fetchDatasetPreview(datasetId, isCustomDataset),
-      fetchBackbone(sessionId, activeMethod),
-    ])
-      .then(([orig, back]) => {
-        setOriginal(orig)
-        setBackbone(back)
+    setError(null)
+    fetchVisualComparison(sessionId, activeMethod)
+      .then((data) => setComparison(data))
+      .catch((err) => {
+        console.error(err)
+        setError(err?.response?.data?.detail ?? 'Could not load the full Step-6 visualization graph.')
+        setComparison(null)
       })
-      .catch(console.error)
       .finally(() => setLoading(false))
-  }, [activeMethod, sessionId, datasetId, isCustomDataset])
+  }, [activeMethod, sessionId])
 
   const currentMethod = METHODS.find((x) => x.id === activeMethod)
+  const methodLabel = currentMethod?.short ?? activeMethod.toUpperCase()
 
   const handleBack = () => {
     if (mode === 'lab') {
@@ -112,13 +95,22 @@ export default function VisualizationWorkspace({
     )
   }
 
+  const exportTitle =
+    viewMode === 'score'
+      ? `${methodLabel} score-extreme original graph`
+      : `${methodLabel} Isolation Forest backbone overlay`
+
+  const exportSubtitle =
+    viewMode === 'score'
+      ? `Full unsampled original network. Blue edges are the lowest 20% by ${methodLabel} score; red edges are the highest 20% by ${methodLabel} score; black edges are the remaining original edges.`
+      : `Full unsampled original network. Purple edges are the Isolation Forest selected ${methodLabel} backbone edges; black edges are the remaining original edges.`
+
   return (
     <div>
       <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
         <div className="flex gap-2 flex-wrap">
           {readyMethods.map((id) => {
             const mt = METHODS.find((x) => x.id === id)
-
             return (
               <button
                 key={id}
@@ -130,14 +122,14 @@ export default function VisualizationWorkspace({
                     : { backgroundColor: '#f3f4f6', color: '#374151' }
                 }
               >
-                {mt?.short}
+                {mt?.short ?? id.toUpperCase()}
               </button>
             )
           })}
         </div>
 
         <div className="flex bg-gray-100 rounded-lg p-1 gap-1">
-          {(['side', 'overlay'] as const).map((modeOption) => (
+          {(['score', 'if'] as const).map((modeOption) => (
             <button
               key={modeOption}
               onClick={() => setViewMode(modeOption)}
@@ -147,7 +139,7 @@ export default function VisualizationWorkspace({
                   : 'text-gray-500'
               }`}
             >
-              {modeOption === 'side' ? '⬜⬜ Side by side' : '⬛ Overlay'}
+              {modeOption === 'score' ? '🔵🔴 Score extremes' : '🟣 IF backbone'}
             </button>
           ))}
         </div>
@@ -159,96 +151,90 @@ export default function VisualizationWorkspace({
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
           </svg>
-          Loading graph data…
+          Loading full unsampled graph and shared layout…
         </div>
       )}
 
-      {!loading && original && backbone && (
+      {!loading && error && (
+        <div className="p-4 rounded-xl border border-red-200 bg-red-50 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      {!loading && comparison && (
         <>
           <div className="flex gap-4 mb-4 text-sm flex-wrap">
             <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-gray-300 inline-block" />
+              <span className="w-3 h-3 rounded-full bg-black inline-block" />
               <span className="text-gray-500">
-                Original: {original.nodes.length} nodes · {original.links.length} edges
-                {original.sampled && ' (sampled)'}
+                Full original: {comparison.nodes} nodes · {comparison.edges} edges · no sampling
               </span>
             </div>
 
-            <div className="flex items-center gap-2">
-              <span
-                className="w-3 h-3 rounded-full inline-block"
-                style={{ backgroundColor: currentMethod?.color }}
-              />
-              <span className="text-gray-500">
-                {currentMethod?.short} Backbone: {backbone.nodes.length} nodes · {backbone.links.length} edges
-              </span>
-            </div>
+            {viewMode === 'score' ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: '#2563EB' }} />
+                  <span className="text-gray-500">Lowest 20% {methodLabel}: {comparison.low_count} edges</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: '#DC2626' }} />
+                  <span className="text-gray-500">Highest 20% {methodLabel}: {comparison.high_count} edges</span>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: '#7C3AED' }} />
+                <span className="text-gray-500">Isolation Forest backbone: {comparison.if_count} edges</span>
+              </div>
+            )}
           </div>
 
-          {viewMode === 'side' ? (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div>
-                <div className="flex items-center justify-between gap-3 mb-2">
-                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Original Graph</div>
-                  <PaperExportButton config={{ figureType: 'graph', title: 'Original graph', filename: `${datasetId}-original-graph`, payload: { title: 'Original graph', subtitle: original.sampled ? 'Preview graph sampled for interface performance.' : 'Original graph.', graph: original } }} />
-                </div>
-
-                <GraphCanvas
-                  data={original}
-                  height={420}
-                  showLabels={true}
-                  downloadLabel="original-graph"
-                />
+          <div>
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div className="text-xs text-gray-500 flex items-center flex-wrap gap-x-4 gap-y-2">
+                {viewMode === 'score' ? (
+                  <>
+                    <span><span className="inline-block w-6 border-b-2 border-black mr-1 align-middle opacity-40" /> Original edges</span>
+                    <span><span className="inline-block w-6 border-b-2 mr-1 align-middle" style={{ borderColor: '#2563EB' }} /> Lowest 20%</span>
+                    <span><span className="inline-block w-6 border-b-2 mr-1 align-middle" style={{ borderColor: '#DC2626' }} /> Highest 20%</span>
+                  </>
+                ) : (
+                  <>
+                    <span><span className="inline-block w-6 border-b-2 border-black mr-1 align-middle opacity-40" /> Original edges</span>
+                    <span><span className="inline-block w-6 border-b-2 mr-1 align-middle" style={{ borderColor: '#7C3AED' }} /> IF backbone</span>
+                  </>
+                )}
               </div>
 
-              <div>
-                <div className="flex items-center justify-between gap-3 mb-2">
-                  <div
-                    className="text-xs font-semibold uppercase tracking-wide"
-                    style={{ color: currentMethod?.color }}
-                  >
-                    {currentMethod?.short} Backbone
-                  </div>
-                  <PaperExportButton config={{ figureType: 'graph', title: `${currentMethod?.short ?? activeMethod} backbone`, filename: `${datasetId}-${activeMethod}-backbone`, payload: { title: `${currentMethod?.short ?? activeMethod} backbone`, subtitle: 'Extracted backbone graph.', graph: backbone, accent_color: currentMethod?.color, show_labels: true } }} />
-                </div>
-
-                <GraphCanvas
-                  data={backbone}
-                  accentColor={currentMethod?.color}
-                  height={420}
-                  showLabels={true}
-                  downloadLabel={`backbone-${activeMethod}`}
-                />
-              </div>
-            </div>
-          ) : (
-            <div>
-              <div className="flex items-center justify-between gap-3 mb-2">
-                <div className="text-xs text-gray-400">
-                  <span className="inline-block w-6 border-b-2 border-gray-300 mr-1 align-middle" />
-                  Removed edges (grey)
-                  <span
-                    className="inline-block w-6 border-b-2 ml-4 mr-1 align-middle"
-                    style={{ borderColor: currentMethod?.color }}
-                  />
-                  Backbone edges
-                </div>
-                <PaperExportButton config={{ figureType: 'graph', title: `${currentMethod?.short ?? activeMethod} overlay`, filename: `${datasetId}-${activeMethod}-overlay`, payload: { title: `${currentMethod?.short ?? activeMethod} overlay`, subtitle: 'Original graph with the extracted backbone edges highlighted.', graph: original, highlight_edges: Array.from(backboneEdgeSet ?? []), accent_color: currentMethod?.color } }} />
-              </div>
-
-              <GraphCanvas
-                data={original}
-                backboneEdgeSet={backboneEdgeSet}
-                accentColor={currentMethod?.color}
-                height={500}
-                showLabels={false}
-                downloadLabel={`overlay-${activeMethod}`}
+              <PaperExportButton
+                config={{
+                  figureType: 'graph',
+                  title: exportTitle,
+                  filename: `${datasetId ?? 'dataset'}-${activeMethod}-${viewMode === 'score' ? 'score-extremes' : 'if-backbone-overlay'}`,
+                  payload: {
+                    title: exportTitle,
+                    subtitle: exportSubtitle,
+                    graph: comparison.graph,
+                    edge_style_mode: viewMode === 'score' ? 'score_extremes' : 'if_backbone',
+                    show_labels: false,
+                    large_figure: true,
+                  },
+                }}
               />
             </div>
-          )}
+
+            <GraphCanvas
+              data={comparison.graph}
+              height={620}
+              showLabels={false}
+              edgeColorMode={viewMode === 'score' ? 'score-extremes' : 'if-backbone'}
+              downloadLabel={`${activeMethod}-${viewMode}`}
+            />
+          </div>
 
           <div className="mt-4 p-3 bg-gray-50 rounded-lg text-xs text-gray-500">
-            💡 Scroll to zoom · Drag nodes to reposition · Drag background to pan
+            💡 This Step 6 view uses the full selected network, not the Step 1 preview sample. The same fixed node positions are reused when you switch between score extremes and Isolation Forest backbone.
           </div>
         </>
       )}

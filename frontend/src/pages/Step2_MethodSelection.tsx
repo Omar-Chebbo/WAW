@@ -66,7 +66,9 @@ export default function Step2() {
             {m.requires_anomaly && (
               <div className="mt-3 inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"
                 style={{ backgroundColor: '#FAEEDA', color: '#BA7517' }}>
-                ⚠ Requires anomaly labeling
+                {m.selection_method === 'direct_high' || m.selection_method === 'direct_low'
+                  ? '⚡ Direct threshold'
+                  : '⚠ Requires anomaly labeling'}
               </div>
             )}
           </button>

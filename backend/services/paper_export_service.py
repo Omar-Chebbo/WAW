@@ -83,7 +83,7 @@ def _save_figure(fig, fmt: str) -> bytes:
     buf = io.BytesIO()
     fmt = fmt.lower()
     if fmt == 'png':
-        fig.savefig(buf, format='png', dpi=420)
+        fig.savefig(buf, format='png', dpi=600)
     elif fmt == 'svg':
         fig.savefig(buf, format='svg')
     elif fmt == 'pdf':
@@ -113,7 +113,11 @@ def _build_graph(graph_data: dict[str, Any]) -> nx.Graph:
     g = nx.Graph()
     for node in graph_data.get('nodes', []):
         node_id = str(node.get('id'))
-        g.add_node(node_id, degree=_safe_float(node.get('degree')))
+        attrs = {'degree': _safe_float(node.get('degree'))}
+        if node.get('x') is not None and node.get('y') is not None:
+            attrs['x'] = _safe_float(node.get('x'))
+            attrs['y'] = _safe_float(node.get('y'))
+        g.add_node(node_id, **attrs)
     for link in graph_data.get('links', []):
         source = link.get('source')
         target = link.get('target')
@@ -123,9 +127,21 @@ def _build_graph(graph_data: dict[str, Any]) -> nx.Graph:
             target = target.get('id')
         if source is None or target is None:
             continue
-        g.add_edge(str(source), str(target), weight=_safe_float(link.get('weight'), 1.0))
+        attrs = dict(link)
+        attrs.pop('source', None)
+        attrs.pop('target', None)
+        attrs['weight'] = _safe_float(attrs.get('weight'), 1.0)
+        g.add_edge(str(source), str(target), **attrs)
     return g
 
+
+def _positions_from_graph_data(graph_data: dict[str, Any]) -> dict[str, tuple[float, float]]:
+    positions = {}
+    for node in graph_data.get('nodes', []):
+        if node.get('x') is None or node.get('y') is None:
+            continue
+        positions[str(node.get('id'))] = (_safe_float(node.get('x')), _safe_float(node.get('y')))
+    return positions
 
 def _wrap(text: Any, width: int = 22) -> str:
     text = str(text)
@@ -167,10 +183,9 @@ def _style_axes(ax, *, x_label: str | None = None, y_label: str | None = None, g
 
 
 def _apply_title(fig, title: str | None, subtitle: str | None = None):
+    # Subtitle intentionally disabled for exported figures.
     if title:
         fig.suptitle(title, x=0.08, y=0.98, ha='left', va='top', fontsize=11.5, fontweight='bold', color=TEXT)
-    if subtitle:
-        fig.text(0.08, 0.94, textwrap.fill(str(subtitle), width=92), ha='left', va='top', fontsize=8.8, color=SUBTEXT)
 
 
 def _legend_above(ax, ncol: int = 2, *, y: float = 1.10):
@@ -439,18 +454,35 @@ def _luminance(rgb):
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
-def _draw_graph(ax, graph_data: dict[str, Any], title: str, highlight_edges: set[str] | None = None, accent_color: str = '#0F766E', positions: dict | None = None, show_labels: bool = True):
+def _draw_graph(
+    ax,
+    graph_data: dict[str, Any],
+    title: str,
+    highlight_edges: set[str] | None = None,
+    accent_color: str = '#0F766E',
+    positions: dict | None = None,
+    show_labels: bool = True,
+    edge_style_mode: str = 'default',
+):
     g = _build_graph(graph_data)
     if positions is None:
-        positions = _compute_layout(g)
+        positions = _positions_from_graph_data(graph_data) or _compute_layout(g)
     degrees = dict(g.degree())
     weights = [g[u][v].get('weight', 1.0) for u, v in g.edges()] or [1.0]
     max_w = max(weights)
     max_deg = max(degrees.values() or [1])
-    node_sizes = [180 + 520 * math.sqrt(max(degrees.get(n, 1), 1) / max(max_deg, 1)) for n in g.nodes()]
+    large_graph = g.number_of_edges() > 2500 or g.number_of_nodes() > 1200
+
+    if large_graph:
+        node_sizes = [3 + 22 * math.sqrt(max(degrees.get(n, 1), 1) / max(max_deg, 1)) for n in g.nodes()]
+    else:
+        node_sizes = [180 + 520 * math.sqrt(max(degrees.get(n, 1), 1) / max(max_deg, 1)) for n in g.nodes()]
     node_colors = [degrees.get(n, 0) for n in g.nodes()]
 
     normal_edges = []
+    low_edges = []
+    high_edges = []
+    if_edges = []
     highlighted = []
     edge_lookup = set(highlight_edges or [])
 
@@ -460,10 +492,26 @@ def _draw_graph(ax, graph_data: dict[str, Any], title: str, highlight_edges: set
         return {f'{v}--{u}', f'{v}|{u}'}
 
     for u, v in g.edges():
-        if edge_lookup and edge_keys(str(u), str(v)) & edge_lookup:
+        attrs = g[u][v]
+        if edge_style_mode == 'score_extremes':
+            if attrs.get('score_region') == 'low' or attrs.get('is_low_score') is True:
+                low_edges.append((u, v))
+            elif attrs.get('score_region') == 'high' or attrs.get('is_high_score') is True:
+                high_edges.append((u, v))
+            else:
+                normal_edges.append((u, v))
+        elif edge_style_mode == 'if_backbone':
+            if attrs.get('is_if_backbone') is True:
+                if_edges.append((u, v))
+            else:
+                normal_edges.append((u, v))
+        elif edge_lookup and edge_keys(str(u), str(v)) & edge_lookup:
             highlighted.append((u, v))
         else:
             normal_edges.append((u, v))
+
+    def widths(edgelist, base=0.35, span=1.5):
+        return [base + span * (g[u][v].get('weight', 1.0) / max_w) for u, v in edgelist]
 
     if normal_edges:
         nx.draw_networkx_edges(
@@ -471,10 +519,17 @@ def _draw_graph(ax, graph_data: dict[str, Any], title: str, highlight_edges: set
             positions,
             edgelist=normal_edges,
             ax=ax,
-            edge_color='#8FB4AA',
-            alpha=0.55,
-            width=[0.7 + 1.7 * (g[u][v].get('weight', 1.0) / max_w) for u, v in normal_edges],
+            edge_color='#000000' if edge_style_mode in {'score_extremes', 'if_backbone'} else '#8FB4AA',
+            alpha=1.0 if edge_style_mode in {'score_extremes', 'if_backbone'} else 0.55,
+            width=widths(normal_edges, base=0.18 if large_graph else 0.45, span=0.55 if large_graph else 1.6),
+
         )
+    if low_edges:
+        nx.draw_networkx_edges(g, positions, edgelist=low_edges, ax=ax, edge_color='#2563EB', alpha=1.0, width=widths(low_edges, base=0.45 if large_graph else 0.70, span=1.15 if large_graph else 2.0))
+    if high_edges:
+        nx.draw_networkx_edges(g, positions, edgelist=high_edges, ax=ax, edge_color='#DC2626', alpha=1.0, width=widths(high_edges, base=0.45 if large_graph else 0.70, span=1.15 if large_graph else 2.0))
+    if if_edges:
+        nx.draw_networkx_edges(g, positions, edgelist=if_edges, ax=ax, edge_color='#7C3AED', alpha=1.0, width=widths(if_edges, base=0.50 if large_graph else 0.75, span=1.25 if large_graph else 2.2))
     if highlighted:
         nx.draw_networkx_edges(
             g,
@@ -483,7 +538,7 @@ def _draw_graph(ax, graph_data: dict[str, Any], title: str, highlight_edges: set
             ax=ax,
             edge_color=accent_color,
             alpha=0.92,
-            width=[1.0 + 2.6 * (g[u][v].get('weight', 1.0) / max_w) for u, v in highlighted],
+            width=widths(highlighted, base=1.0, span=2.6),
         )
 
     nodes_artist = nx.draw_networkx_nodes(
@@ -494,10 +549,11 @@ def _draw_graph(ax, graph_data: dict[str, Any], title: str, highlight_edges: set
         node_color=node_colors,
         cmap=plt.cm.Blues,
         edgecolors='#1E3A8A',
-        linewidths=0.9,
+        linewidths=0.15 if large_graph else 0.9,
+        alpha=0.70 if large_graph else 0.86,
     )
 
-    if show_labels:
+    if show_labels and not large_graph:
         cmap = plt.cm.Blues
         norm = plt.Normalize(vmin=min(node_colors or [0]), vmax=max(node_colors or [1]))
         texts = {}
@@ -530,8 +586,31 @@ def _draw_graph(ax, graph_data: dict[str, Any], title: str, highlight_edges: set
         ax.set_ylim(ymin - ypad, ymax + ypad)
     ax.set_aspect('equal')
     ax.set_axis_off()
-    return nodes_artist
 
+    if edge_style_mode == 'score_extremes':
+        ax.legend(
+            handles=[
+                Patch(facecolor='#000000', alpha=1.0, label='Original edges'),
+                Patch(facecolor='#2563EB', label='Lowest 20% score'),
+                Patch(facecolor='#DC2626', label='Highest 20% score'),
+            ],
+            loc='lower center',
+            bbox_to_anchor=(0.5, -0.02),
+            ncol=3,
+            frameon=False,
+        )
+    elif edge_style_mode == 'if_backbone':
+        ax.legend(
+            handles=[
+                Patch(facecolor='#000000', alpha=1.0, label='Original edges'),
+                Patch(facecolor='#7C3AED', label='Isolation Forest backbone'),
+            ],
+            loc='lower center',
+            bbox_to_anchor=(0.5, -0.02),
+            ncol=2,
+            frameon=False,
+        )
+    return nodes_artist
 
 def render_graph(payload: dict[str, Any], fmt: str) -> bytes:
     _apply_style()
@@ -539,10 +618,10 @@ def render_graph(payload: dict[str, Any], fmt: str) -> bytes:
     graph_data = payload.get('graph', payload)
     accent = payload.get('accent_color', '#0F766E')
     highlight_edges = set(payload.get('highlight_edges', []) or [])
-    fig, ax = plt.subplots(figsize=(6.8, 5.2))
+    fig, ax = plt.subplots(figsize=(16.0, 10.0) if payload.get('large_figure', False) else (6.8, 5.2))
     _apply_title(fig, title, payload.get('subtitle'))
-    _reserve_paper_margins(fig, top=0.90, bottom=0.03, left=0.03, right=0.97)
-    nodes_artist = _draw_graph(ax, graph_data, title=title, highlight_edges=highlight_edges, accent_color=accent, show_labels=payload.get('show_labels', True))
+    _reserve_paper_margins(fig, top=0.90, bottom=0.055 if payload.get('edge_style_mode') else 0.025, left=0.015, right=0.985)
+    nodes_artist = _draw_graph(ax, graph_data, title=title, highlight_edges=highlight_edges, accent_color=accent, show_labels=payload.get('show_labels', True), edge_style_mode=payload.get('edge_style_mode', 'default'))
     if payload.get('show_colorbar', False):
         cbar = fig.colorbar(nodes_artist, ax=ax, fraction=0.03, pad=0.012)
         cbar.set_label('Node degree', fontsize=8.5)

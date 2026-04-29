@@ -26,6 +26,7 @@ import type {
   IterativeMethodId,
   ScoreCacheStatusResponse,
   ScoreStrategy,
+  VisualComparisonResponse,
 } from '../types'
 
 const api = axios.create({ baseURL: '/api' })
@@ -127,6 +128,8 @@ export const extractBackbones = (sessionId: string, methodIds: string[]) =>
 export const fetchBackbone = (sessionId: string, methodId: string) =>
   api.get<GraphData>(`/backbone/${sessionId}/${methodId}`).then(r => r.data)
 
+export const fetchVisualComparison = (sessionId: string, methodId: string) =>
+  api.get<VisualComparisonResponse>(`/backbone/${sessionId}/${methodId}/visual-comparison`).then(r => r.data)
 // ── Evaluation ────────────────────────────────────────────────────
 export const fetchMetricsList = () =>
   api.get<MetricMeta[]>('/evaluation/metrics').then(r => r.data)

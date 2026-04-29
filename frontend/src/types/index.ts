@@ -18,6 +18,7 @@ export interface GraphData {
   nodes: GraphNode[]
   links: GraphLink[]
   sampled?: boolean
+  fixed_layout?: boolean
 }
 
 export interface GraphStats {
@@ -47,6 +48,8 @@ export interface MethodInfo {
   short: string
   description: string
   requires_anomaly: boolean
+  requires_preprocessing: boolean
+  selection_method: string | null
   color: string
 }
 
@@ -690,4 +693,17 @@ export interface IterativeExtractionResponse {
   original_graph: GraphData
   methods: Partial<Record<IterativeMethodId, IterativeMethodResult>>
   compare_all: IterativeCompareAll
+}
+
+export interface VisualComparisonResponse {
+  method_id: string
+  score_column: string
+  low_percent: number
+  high_percent: number
+  low_count: number
+  high_count: number
+  if_count: number
+  nodes: number
+  edges: number
+  graph: GraphData
 }

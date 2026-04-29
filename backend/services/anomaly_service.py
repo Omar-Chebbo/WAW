@@ -10,6 +10,7 @@ import pandas as pd
 from backend.core.anomaly import (
     label_anomalies,
     label_anomalies_with_percentile,
+    label_by_direct_threshold,
     anomaly_summary,
     extract_result_dataframe,
     extract_result_backbone,
@@ -76,6 +77,8 @@ def run_anomaly_labeling(
 
     data = load_scores(session_id, method_id)
 
+    selection_method = config.get("selection_method", "if")
+
     if method_id == "pa_lp":
         # For PA+LP, preprocessing_mode is interpreted as feature scaling /
         # transformation mode over the two feature columns.
@@ -85,6 +88,15 @@ def run_anomaly_labeling(
             contamination=selection_fraction,
             scaling_mode=scaling_mode,
         )
+    elif selection_method in ("direct_high", "direct_low"):
+        # Direct thresholding: no Isolation Forest, sort by raw score
+        result = label_by_direct_threshold(
+            data,
+            score_col,
+            contamination=selection_fraction,
+            direction=selection_method,
+        )
+        data = extract_result_dataframe(result)
     else:
         result = label_anomalies(
             data,
@@ -118,11 +130,23 @@ def run_manual_labeling(session_id: str, method_id: str, percentile: float) -> d
     else:
         data = load_scores(session_id, method_id)
 
+    selection_method = config.get("selection_method", "if")
+
     if method_id == "pa_lp":
         if f"{score_col}_if_rank" not in data.columns:
             data = label_multifeature_edges(data, contamination=fraction, scaling_mode="none")
         else:
             from backend.core.anomaly import apply_top_fraction_selection
+            data = apply_top_fraction_selection(data, score_col, fraction)
+    elif selection_method in ("direct_high", "direct_low"):
+        # Direct threshold: re-sort and re-select by percentage
+        from backend.core.anomaly import apply_top_fraction_selection
+        if f"{score_col}_if_rank" not in data.columns:
+            result = label_by_direct_threshold(
+                data, score_col, contamination=fraction, direction=selection_method,
+            )
+            data = extract_result_dataframe(result)
+        else:
             data = apply_top_fraction_selection(data, score_col, fraction)
     else:
         if f"{score_col}_normalized" not in data.columns:
@@ -140,12 +164,32 @@ def load_labeled(session_id: str, method_id: str) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
+def _has_finite(values) -> bool:
+    """Return True if *values* contains at least one finite (non-NaN, non-inf) number."""
+    arr = np.asarray(values, dtype=float)
+    return len(arr) > 0 and bool(np.any(np.isfinite(arr)))
+
+
+def _default_stats() -> dict:
+    """Zeroed-out stats returned when a column is entirely NaN."""
+    return {
+        "min": 0.0, "max": 0.0, "mean": 0.0,
+        "median": 0.0, "std": 0.0, "skewness": 0.0,
+    }
+
+
 def build_histogram(values, anomaly_mask=None, bins: int = 20):
     arr = np.asarray(values, dtype=float)
-    if len(arr) == 0:
+    if len(arr) == 0 or not _has_finite(arr):
         return []
 
-    counts, edges = np.histogram(arr, bins=bins)
+    # Drop NaN/inf so the histogram bins are well-defined
+    finite_mask = np.isfinite(arr)
+    arr_clean = arr[finite_mask]
+    if anomaly_mask is not None and len(anomaly_mask) == len(arr):
+        anomaly_mask = anomaly_mask[finite_mask]
+
+    counts, edges = np.histogram(arr_clean, bins=bins)
     _ = counts
 
     result = []
@@ -153,9 +197,9 @@ def build_histogram(values, anomaly_mask=None, bins: int = 20):
         lo, hi = edges[i], edges[i + 1]
 
         if i == len(edges) - 2:
-            mask = (arr >= lo) & (arr <= hi)
+            mask = (arr_clean >= lo) & (arr_clean <= hi)
         else:
-            mask = (arr >= lo) & (arr < hi)
+            mask = (arr_clean >= lo) & (arr_clean < hi)
 
         total = int(mask.sum())
         anomalies = int((mask & anomaly_mask).sum()) if anomaly_mask is not None else 0
@@ -254,6 +298,11 @@ def build_anomaly_inspector_from_df(data: pd.DataFrame, method_id: str) -> dict:
         ]
     ].to_dict(orient="records")
 
+    # For direct-threshold methods the IF columns (decision_function, score_samples)
+    # may be entirely NaN because no Isolation Forest is fitted.
+    has_decision = decision_col in data.columns and _has_finite(data[decision_col].values)
+    has_score_samples = score_samples_col in data.columns and _has_finite(data[score_samples_col].values)
+
     return {
         "method_id": method_id,
         "score_column": score_col,
@@ -282,10 +331,10 @@ def build_anomaly_inspector_from_df(data: pd.DataFrame, method_id: str) -> dict:
         ),
         "counts": anomaly_summary(data, score_col),
         "stats": {
-            "raw": build_score_stats(data[raw_col].values),
-            "transformed": build_score_stats(data[transformed_col].values),
-            "score_samples": build_score_stats(data[score_samples_col].values),
-            "decision_function": build_score_stats(data[decision_col].values),
+            "raw": build_score_stats(data[raw_col].values) if _has_finite(data[raw_col].values) else _default_stats(),
+            "transformed": build_score_stats(data[transformed_col].values) if _has_finite(data[transformed_col].values) else _default_stats(),
+            "score_samples": build_score_stats(data[score_samples_col].values) if has_score_samples else _default_stats(),
+            "decision_function": build_score_stats(data[decision_col].values) if has_decision else _default_stats(),
         },
         "histograms": {
             "raw": build_histogram(data[raw_col].values, anomaly_mask, bins=20),

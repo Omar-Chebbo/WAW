@@ -179,7 +179,7 @@ async def compute_scores(
                 request_results.setdefault("pa", pa_df)
                 if "pa" in method_ids:
                     save_session_score(session_id, "pa", pa_df, dataset_path=dataset_path)
-                    await send_method_ready("pa", "Preferential Attachment computed and saved ✓")
+                    await send_method_ready("pa", "PA+IF computed and saved ✓")
 
         if lp_df is None:
             if score_strategy != "recompute" and has_valid_cached_score(dataset_path, "lp"):
@@ -193,7 +193,7 @@ async def compute_scores(
                 request_results.setdefault("lp", lp_df)
                 if "lp" in method_ids:
                     save_session_score(session_id, "lp", lp_df, dataset_path=dataset_path)
-                    await send_method_ready("lp", "Local Path Index computed and saved ✓")
+                    await send_method_ready("lp", "LP+IF computed and saved ✓")
 
         combined = merge_pa_lp_scores(pa_df, lp_df)
         save_cached_score(dataset_path, method_id, combined, origin="derived")
@@ -214,6 +214,43 @@ async def compute_scores(
                 "score_column": "pa_lp",
                 "feature_columns": ["preferential_attachment_1", "local_path_index_1"],
                 "source_kind": source_kind,
+                "output_path": str(get_session_score_path(session_id, method_id)),
+            }
+            continue
+
+        # ── Direct Thresholding methods: derive scores from base method ──
+        derives_from = config.get("derives_from")
+        if derives_from and config.get("selection_method") in ("direct_high", "direct_low"):
+            base_session_path = get_session_score_path(session_id, derives_from)
+
+            # Ensure the base method scores are available
+            if derives_from not in request_results:
+                # Try to reuse from session or cache
+                if score_strategy != "recompute" and session_score_matches_dataset(session_id, derives_from, dataset_path):
+                    base_df = pd.read_csv(base_session_path)
+                elif score_strategy != "recompute" and has_valid_cached_score(dataset_path, derives_from):
+                    base_df = load_cached_score(dataset_path, derives_from)
+                    save_session_score(session_id, derives_from, base_df, dataset_path=dataset_path)
+                else:
+                    # Compute the base method first
+                    base_df, _ = await ensure_regular_method_ready(derives_from)
+                    request_results[derives_from] = base_df
+            else:
+                base_df = request_results[derives_from]
+
+            # Copy the base method's scores for this derived method
+            save_session_score(session_id, method_id, base_df, dataset_path=dataset_path)
+            request_results[method_id] = base_df
+            base_config = METHOD_REGISTRY[derives_from]
+            await send_method_ready(
+                method_id,
+                f"{config['label']} derived from {base_config['label']} scores ✓",
+            )
+            summary[method_id] = {
+                "edges_scored": len(base_df),
+                "score_column": config["score_column"],
+                "source_kind": "derived",
+                "derives_from": derives_from,
                 "output_path": str(get_session_score_path(session_id, method_id)),
             }
             continue

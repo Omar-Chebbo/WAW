@@ -294,6 +294,77 @@ def label_anomalies(
     return AnomalyLabelResult(data=labeled, backbone=backbone)
 
 
+def label_by_direct_threshold(
+    data: pd.DataFrame,
+    column: str,
+    contamination: float | str | None = None,
+    direction: str = "direct_high",
+) -> AnomalyLabelResult:
+    """
+    Direct threshold backbone extraction — no Isolation Forest.
+
+    Sorts edges by the raw score column and selects:
+      - "direct_high": top X% edges with the highest scores  (rank 1 = highest)
+      - "direct_low":  bottom X% edges with the lowest scores (rank 1 = lowest)
+
+    The output DataFrame has the same column schema as label_anomalies() so
+    that downstream steps (backbone extraction, visual comparison, evaluation)
+    work without modification.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        Scored edge table (must contain `column`).
+    column : str
+        Score column to sort by (e.g. "preferential_attachment_1").
+    contamination : float | str | None
+        Fraction of edges to keep as backbone (0, 1].
+    direction : str
+        "direct_high" or "direct_low".
+    """
+    fraction = normalize_selection_fraction(contamination)
+    total = len(data)
+    selected_count = top_count_from_fraction(total, fraction)
+
+    scores = data[column].to_numpy(dtype=float)
+
+    # Build ranking: rank 1 = most anomalous (highest or lowest depending on direction)
+    if direction == "direct_high":
+        # Highest score = rank 1 (most anomalous for hub-type edges)
+        sorted_indices = np.argsort(-scores, kind="mergesort")
+    else:
+        # Lowest score = rank 1 (most anomalous for rare-type edges)
+        sorted_indices = np.argsort(scores, kind="mergesort")
+
+    rank = np.empty_like(sorted_indices)
+    rank[sorted_indices] = np.arange(1, len(scores) + 1)
+
+    # Normalise to [0, 1] for compatibility with the inspector UI
+    score_min, score_max = float(scores.min()), float(scores.max())
+    score_range = score_max - score_min if score_max > score_min else 1.0
+    normalized = (scores - score_min) / score_range
+
+    labeled = data.copy()
+    labeled[f"{column}_transformed"] = scores
+    labeled[f"{column}_normalized"] = normalized
+    labeled[f"{column}_anomaly_score"] = (
+        -scores if direction == "direct_high" else scores
+    )
+    labeled[f"{column}_if_score_samples"] = scores
+    labeled[f"{column}_if_decision_function"] = np.nan
+    labeled[f"{column}_if_rank"] = rank
+    labeled[f"{column}_preprocessing"] = "direct_threshold"
+    labeled[f"{column}_shape_class"] = "direct_threshold"
+    labeled[f"{column}_distribution_skewness"] = 0.0
+    labeled[f"{column}_zero_ratio"] = float(np.sum(scores == 0) / len(scores)) if len(scores) > 0 else 0.0
+
+    # Apply fraction-based selection using the shared helper
+    labeled = apply_top_fraction_selection(labeled, column, contamination)
+
+    backbone = _build_backbone_object(labeled, column)
+    return AnomalyLabelResult(data=labeled, backbone=backbone)
+
+
 def label_anomalies_with_percentile(
     data: DataLike, column: str, percentile: float
 ) -> pd.DataFrame:

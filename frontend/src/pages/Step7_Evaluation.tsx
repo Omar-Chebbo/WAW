@@ -87,6 +87,11 @@ function DistributionPanel({
     df:  '#BA7517',
     pa:  '#3C3489',
     lp:  '#993C1D',
+    pa_lp: '#0F766E',
+    high_pa: '#4F46E5',
+    low_pa: '#7C3AED',
+    high_lp: '#DC2626',
+    low_lp: '#EA580C',
   }
 
   // Build degree CCDF series
@@ -424,7 +429,7 @@ const [error,     setError]     = useState<string | null>(null)
     })
   }, [report, metricsList, selectedMethods, selectedMetrics])
 
-  const RADAR_COLORS = ['#0F6E56', '#BA7517', '#3C3489', '#993C1D']
+  const RADAR_COLORS = ['#0F6E56', '#BA7517', '#3C3489', '#993C1D', '#0F766E', '#4F46E5', '#7C3AED', '#DC2626', '#EA580C']
 
   return (
     <StepCard stepNumber={7} title="Evaluation"
