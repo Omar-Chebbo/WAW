@@ -207,6 +207,8 @@ def run_multi_feature_study(
     session_id: str | None = None,
     is_custom: bool = False,
     scaling_mode: str = "none",
+    high_region_pct: float = 10.0,
+    low_region_pct: float = 10.0,
 ) -> dict:
     dataset_path, dataset_label = resolve_dataset_path(dataset_id, is_custom=is_custom)
     original_graph = load_graph(dataset_path)
@@ -222,6 +224,8 @@ def run_multi_feature_study(
         scored_df=scored_df,
         contamination=effective_contamination,
         scaling_mode=scaling_mode,
+        high_region_pct=high_region_pct / 100.0,
+        low_region_pct=low_region_pct / 100.0,
     )
 
     return {

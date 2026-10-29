@@ -3,7 +3,7 @@ import axios from 'axios'
 const api = axios.create({ baseURL: '/api' })
 
 export type PaperExportFormat = 'pdf' | 'svg' | 'png'
-export type PaperExportFigureType = 'histogram' | 'line' | 'scatter' | 'bar' | 'ccdf' | 'graph' | 'graph_compare' | 'table' | 'radar'
+export type PaperExportFigureType = 'histogram' | 'line' | 'scatter' | 'single_score_iforest' | 'bar' | 'ccdf' | 'graph' | 'graph_compare' | 'table' | 'radar'
 
 export interface PaperExportRequest {
   figure_type: PaperExportFigureType

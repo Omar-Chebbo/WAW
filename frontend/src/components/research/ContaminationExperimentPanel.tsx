@@ -12,7 +12,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { fetchScoreStatus, runContaminationExperiment, useDatasets } from '../../api/client'
+import { downloadContaminationExcel, fetchScoreStatus, runContaminationExperiment, useDatasets } from '../../api/client'
 import { METHODS } from '../../constants/methods'
 import { useWorkflowStore } from '../../store/workflowStore'
 import {
@@ -31,6 +31,32 @@ import { Button } from '../ui'
 import PaperExportButton from '../export/PaperExportButton'
 import ScoreInspectorSection from '../lab/ScoreInspectorSection'
 import ContaminationGraphDiffPanel from './ContaminationGraphDiffPanel'
+import MultiFeatureNoveltyCard, {
+  makeNoveltyExportRow, NOVELTY_CSV_COLUMNS, downloadNoveltyCsv, noveltySafeFilename,
+  type NoveltyExportRow,
+} from './MultiFeatureNoveltyCard'
+
+// Match Wizard Step 7 exactly: these are its complete registry metrics and
+// display semantics (deviation for transitivity/clustering, value for others).
+const WIZARD_METRIC_COLUMNS = [
+  { key: 'edge_fraction', label: 'Edge percentage', display: 'value' },
+  { key: 'node_fraction', label: 'Node percentage', display: 'value' },
+  { key: 'reachability', label: 'Reachability', display: 'value' },
+  { key: 'num_components', label: 'Number of components', display: 'value' },
+  { key: 'transitivity', label: 'Transitivity deviation', display: 'deviation' },
+  { key: 'avg_clustering', label: 'Avg clustering deviation', display: 'deviation' },
+  { key: 'degree_entropy', label: 'Degree entropy', display: 'value' },
+  { key: 'weight_entropy', label: 'Weight entropy', display: 'value' },
+  { key: 'avg_path_length', label: 'Avg path length', display: 'value' },
+] as const
+
+// The Excel schema is derived from the actual Multi-Feature CSV headers: no drift.
+const NOVELTY_EXPORT_COLUMNS: Array<{ key: string; label: string; format?: 'decimal' | 'integer' | 'percent' }> =
+  NOVELTY_CSV_COLUMNS.map((key) => ({
+    key,
+    label: key,
+    format: (key === 'novel_edges' || key === 'multi_edges' ? 'integer' : 'decimal') as 'integer' | 'decimal',
+  }))
 
 const METHOD_OPTIONS = METHODS.filter((method) => ['pa', 'lp', 'pa_lp'].includes(method.id))
 
@@ -161,7 +187,7 @@ export default function ContaminationExperimentPanel() {
   const [datasetSelection, setDatasetSelection] = useState<DatasetOption | null>(
     datasetOptions[0] ?? null
   )
-  const [methodId, setMethodId] = useState<MethodId>('pa')
+  const [methodId, setMethodId] = useState<MethodId>('pa_lp')
   const [scoreSource, setScoreSource] = useState<ContaminationScoreSource>('auto')
   const [cacheStatus, setCacheStatus] = useState<ScoreCacheStatusResponse | null>(null)
   const [preprocessingMode, setPreprocessingMode] = useState<PreprocessingMode>('none')
@@ -274,6 +300,79 @@ export default function ContaminationExperimentPanel() {
       jaccard_vs_baseline: jaccard(baselineEdgeKeys, run.selected_edge_keys),
     }))
   }, [selectedExperiment, baselineEdgeKeys])
+
+  const propertyColumns = useMemo(() => [
+    { key: 'contamination', label: 'Contamination' },
+    { key: 'flagged_edges', label: 'Flagged edges', format: 'integer' as const },
+    ...WIZARD_METRIC_COLUMNS.map((metric) => ({
+      key: metric.key,
+      label: metric.label,
+      format: (metric.key === 'num_components' ? 'integer' : 'decimal') as 'integer' | 'decimal',
+    })),
+  ], [])
+
+  const propertyRows = useMemo(() => {
+    if (!selectedExperiment) return []
+    return selectedExperiment.runs.map((run) => {
+      const row: Record<string, string | number | null> = {
+        contamination: run.contamination_label,
+        flagged_edges: run.flagged_edges,
+      }
+      WIZARD_METRIC_COLUMNS.forEach((metric) => {
+        const data = run.metrics?.[metric.key]
+        row[metric.key] = data ? (metric.display === 'deviation' ? data.deviation : data.value) : null
+      })
+      return row
+    })
+  }, [selectedExperiment])
+
+  // Same six fields as Multi-Feature Study; one row per requested contamination.
+  // "retention" is the realized edge fraction (including ceil-to-next-edge),
+  // exactly as it is in Multi-Feature Study's one-run CSV.
+  const noveltyRows = useMemo<NoveltyExportRow[]>(() => {
+    if (!selectedExperiment || selectedExperiment.method_id !== 'pa_lp') return []
+    return selectedExperiment.runs.filter((run) => Boolean(run.novelty)).map((run) =>
+      makeNoveltyExportRow(selectedExperiment.dataset_label, run.edge_fraction, {
+        value: run.novelty!.novelty_fraction,
+        novel_edges: run.novelty!.novel_edges,
+        multi_edges: run.novelty!.pa_lp_edges,
+      }),
+    )
+  }, [selectedExperiment])
+
+  const selectedNoveltyRun = selectedRun?.novelty ? selectedRun : selectedExperiment?.runs.find((run) => Boolean(run.novelty))
+  const noveltyChartData = (selectedExperiment?.runs ?? []).filter((run) => Boolean(run.novelty)).map((run) => ({
+    contamination: run.contamination_label,
+    novelty_percent: run.novelty!.novelty_fraction === null ? null : run.novelty!.novelty_fraction! * 100,
+    novel_edges: run.novelty!.novel_edges,
+  }))
+
+  function exportNoveltyCsvAll() {
+    if (!selectedExperiment || !noveltyRows.length) return
+    downloadNoveltyCsv(`${noveltySafeFilename(selectedExperiment.dataset_id)}_multifeature_novelty_all_contaminations.csv`, noveltyRows)
+  }
+
+  const [exporting, setExporting] = useState<'properties' | 'novelty' | null>(null)
+  async function exportExcel(type: 'properties' | 'novelty') {
+    if (!selectedExperiment) return
+    setExporting(type)
+    setError(null)
+    try {
+      await downloadContaminationExcel({
+        title: type === 'properties' ? 'Full Wizard Evaluation by Contamination' : 'Multi-Feature Novelty (Nρ) by Contamination',
+        datasetLabel: selectedExperiment.dataset_label,
+        methodLabel: selectedExperiment.method_label,
+        preprocessing: selectedExperiment.preprocessing_used,
+        filename: `${selectedExperiment.dataset_id}-${selectedExperiment.method_id}-contamination-${type}`,
+        columns: type === 'properties' ? propertyColumns : [...NOVELTY_EXPORT_COLUMNS],
+        rows: type === 'properties' ? propertyRows.map((row) => ({ ...row, contamination: Number(row.contamination) })) : noveltyRows,
+      })
+    } catch (err: any) {
+      setError(err?.response?.data?.detail ?? err?.message ?? 'Excel export failed.')
+    } finally {
+      setExporting(null)
+    }
+  }
 
   const deltaRows = useMemo(() => {
     if (!selectedExperiment) return []
@@ -673,6 +772,160 @@ export default function ContaminationExperimentPanel() {
               </table>
             </div>
           </div>
+
+          {/* Full Wizard Step 7 property registry for every selected contamination. */}
+          <section className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm space-y-4">
+            <div className="flex flex-wrap justify-between items-start gap-4">
+              <div>
+                <h4 className="text-lg font-bold text-navy">All Wizard evaluation properties by contamination</h4>
+                <p className="text-xs text-gray-500 mt-1 max-w-3xl">
+                  Each row is one backbone percentage. Transitivity and clustering show signed relative deviation from the original graph,
+                  while other properties match the values displayed in Wizard Step 7. The same graph metrics are computed for PA, LP, and PA+LP.
+                </p>
+              </div>
+              <Button variant="secondary" onClick={() => exportExcel('properties')} loading={exporting === 'properties'} disabled={propertyRows.length === 0 || selectedExperiment.runs.some((run) => !run.metrics)}>
+                Download properties Excel (.xlsx)
+              </Button>
+            </div>
+            {selectedExperiment.runs.some((run) => !run.metrics) ? (
+              <p className="text-xs text-amber-700">This experiment was created before full metrics were added. Run the experiment again to populate this table.</p>
+            ) : null}
+            <div className="overflow-x-auto">
+              <table className="min-w-max w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200 text-gray-600">
+                    {propertyColumns.map((column) => (
+                      <th key={column.key} className="text-left align-bottom px-3 py-3 font-semibold min-w-[110px] whitespace-normal">{column.label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {propertyRows.map((row, index) => (
+                    <tr key={String(row.contamination)} className={`border-b border-gray-100 ${index % 2 ? 'bg-gray-50/50' : ''}`}>
+                      {propertyColumns.map((column) => (
+                        <td key={column.key} className={`px-3 py-3 tabular-nums ${column.key === 'contamination' ? 'font-semibold text-teal' : 'text-gray-700'}`}>
+                          {row[column.key] === null || row[column.key] === undefined ? '—'
+                            : typeof row[column.key] === 'number'
+                              ? (column.format === 'integer' ? String(Math.round(row[column.key] as number)) : formatNumber(row[column.key] as number))
+                              : row[column.key]}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {selectedExperiment.method_id === 'pa_lp' ? (
+            <section className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm space-y-4">
+              <div className="flex flex-wrap justify-between items-start gap-4">
+                <div>
+                  <h4 className="text-lg font-bold text-navy">Multi-Feature Novelty (Nρ) by contamination</h4>
+                  <p className="text-xs text-gray-500 mt-1 max-w-3xl">
+                    This is the same novelty calculation, explanatory card, and six-column CSV format as the Multi-Feature Study.
+                    Each row is a separate contamination value. The retention column is the actual retained edge fraction,
+                    which may differ slightly from the requested contamination due to whole-edge rounding.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="secondary" onClick={exportNoveltyCsvAll} disabled={noveltyRows.length === 0}>
+                    Export all novelty CSV
+                  </Button>
+                  <Button variant="secondary" onClick={() => exportExcel('novelty')} loading={exporting === 'novelty'} disabled={noveltyRows.length === 0}>
+                    Download novelty Excel (.xlsx)
+                  </Button>
+                </div>
+              </div>
+              {noveltyRows.length === 0 ? (
+                <p className="text-sm text-gray-500">Run the PA+LP contamination experiment again to calculate the same Multi-Feature novelty for every value.</p>
+              ) : (
+                <>
+                  {selectedNoveltyRun?.novelty ? (
+                    <div>
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <p className="text-sm font-semibold text-gray-700">Multi-Feature Study novelty card</p>
+                        <label className="text-sm text-gray-600 flex items-center gap-2">
+                          Contamination
+                          <select
+                            value={selectedNoveltyRun.contamination_label}
+                            onChange={(event) => setSelectedRunLabel(event.target.value)}
+                            className="border border-gray-200 rounded-lg bg-white px-3 py-1.5 text-sm text-navy"
+                          >
+                            {selectedExperiment.runs.filter((run) => Boolean(run.novelty)).map((run) => (
+                              <option value={run.contamination_label} key={run.contamination_label}>{run.contamination_label}</option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                      <MultiFeatureNoveltyCard
+                        novelty={{
+                          value: selectedNoveltyRun.novelty.novelty_fraction,
+                          novel_edges: selectedNoveltyRun.novelty.novel_edges,
+                          multi_edges: selectedNoveltyRun.novelty.pa_lp_edges,
+                        }}
+                        datasetId={selectedExperiment.dataset_id}
+                        datasetLabel={selectedExperiment.dataset_label}
+                        retention={selectedNoveltyRun.edge_fraction}
+                        contextLabel={`Requested contamination: ${selectedNoveltyRun.contamination_label}`}
+                        filename={`${noveltySafeFilename(selectedExperiment.dataset_id)}_multifeature_novelty_${selectedNoveltyRun.contamination_label}.csv`}
+                      />
+                    </div>
+                  ) : null}
+                  <div className="overflow-x-auto">
+                    <table className="min-w-max w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-200 text-gray-600">
+                          <th className="text-left align-bottom px-3 py-3 font-semibold">Contamination</th>
+                          {NOVELTY_EXPORT_COLUMNS.map((col) => (
+                            <th key={col.key} className="text-left align-bottom px-3 py-3 font-semibold min-w-[100px] whitespace-normal">{col.label}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {noveltyRows.map((row, index) => (
+                          <tr key={index} className={`border-b border-gray-100 ${index % 2 ? 'bg-gray-50/50' : ''}`}>
+                            <td className="px-3 py-3 font-semibold text-teal tabular-nums">{selectedExperiment.runs[index]?.contamination_label ?? '—'}</td>
+                            {NOVELTY_EXPORT_COLUMNS.map((col) => {
+                              const value = row[col.key as keyof NoveltyExportRow]
+                              return (
+                                <td key={col.key} className={`px-3 py-3 tabular-nums ${col.key === 'novelty_percent' ? 'font-semibold text-teal' : 'text-gray-700'}`}>
+                                  {value === null ? '—' : typeof value === 'number' ? (col.format === 'integer' ? String(value) : formatNumber(value, col.key === 'novelty_percent' ? 2 : 6)) : value}
+                                </td>
+                              )
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="grid xl:grid-cols-2 gap-5">
+                    <div>
+                      <h5 className="text-sm font-semibold text-navy mb-2">Novelty (%) across contamination</h5>
+                      <ResponsiveContainer width="100%" height={260}>
+                        <LineChart data={noveltyChartData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="contamination" /><YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                          <Tooltip formatter={(v: number) => `${v.toFixed(2)}%`} />
+                          <Line dataKey="novelty_percent" name="Novelty (%)" type="monotone" stroke="#0F766E" strokeWidth={2} dot />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div>
+                      <h5 className="text-sm font-semibold text-navy mb-2">Novel PA+LP edges across contamination</h5>
+                      <ResponsiveContainer width="100%" height={260}>
+                        <BarChart data={noveltyChartData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="contamination" /><YAxis allowDecimals={false} /><Tooltip />
+                          <Bar dataKey="novel_edges" name="Novel PA+LP edges" fill="#0F766E" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </>
+              )}
+            </section>
+          ) : null}
 
           <div className="grid xl:grid-cols-2 gap-6">
             <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">

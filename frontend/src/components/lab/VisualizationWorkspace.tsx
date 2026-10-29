@@ -5,6 +5,7 @@ import { GraphCanvas } from '../graph/GraphCanvas'
 import { METHODS } from '../../constants/methods'
 import { Button } from '../ui'
 import PaperExportButton from '../export/PaperExportButton'
+import { downloadScoreExtremesCSV, downloadIfBackboneCSV } from '../../utils/exportGraphCSV'
 import type { VisualComparisonResponse } from '../../types'
 
 type WorkspaceMode = 'wizard' | 'lab'
@@ -207,21 +208,42 @@ export default function VisualizationWorkspace({ mode = 'wizard' }: Props) {
                 )}
               </div>
 
-              <PaperExportButton
-                config={{
-                  figureType: 'graph',
-                  title: exportTitle,
-                  filename: `${datasetId ?? 'dataset'}-${activeMethod}-${viewMode === 'score' ? 'score-extremes' : 'if-backbone-overlay'}`,
-                  payload: {
+              <div className="flex items-center gap-2">
+                {viewMode === 'score' ? (
+                  <button
+                    onClick={() => downloadScoreExtremesCSV(comparison.graph, datasetId ?? 'dataset', methodLabel)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90"
+                    style={{ backgroundColor: '#475569' }}
+                    title="Download CSV with source, target, weight, score, score_region"
+                  >
+                    ↓ CSV Score Extremes
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => downloadIfBackboneCSV(comparison.graph, datasetId ?? 'dataset', methodLabel)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90"
+                    style={{ backgroundColor: '#475569' }}
+                    title="Download CSV with source, target, weight, score, is_if_backbone"
+                  >
+                    ↓ CSV IF Backbone
+                  </button>
+                )}
+                <PaperExportButton
+                  config={{
+                    figureType: 'graph',
                     title: exportTitle,
-                    subtitle: exportSubtitle,
-                    graph: comparison.graph,
-                    edge_style_mode: viewMode === 'score' ? 'score_extremes' : 'if_backbone',
-                    show_labels: false,
-                    large_figure: true,
-                  },
-                }}
-              />
+                    filename: `${datasetId ?? 'dataset'}-${activeMethod}-${viewMode === 'score' ? 'score-extremes' : 'if-backbone-overlay'}`,
+                    payload: {
+                      title: exportTitle,
+                      subtitle: exportSubtitle,
+                      graph: comparison.graph,
+                      edge_style_mode: viewMode === 'score' ? 'score_extremes' : 'if_backbone',
+                      show_labels: false,
+                      large_figure: true,
+                    },
+                  }}
+                />
+              </div>
             </div>
 
             <GraphCanvas

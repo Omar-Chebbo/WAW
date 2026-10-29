@@ -452,6 +452,33 @@ export default function ScoreInspectorSection({
     },
   }
 
+  // Dedicated manuscript Figure 2 export; independent of the UI contamination.
+  // Single-feature runs only: PA+LP score_samples are joint-model scores and
+  // cannot be used for the requested PA-only / LP-only plots.
+  const paperFigure2Method = inspector.method_id === 'pa' || inspector.method_id === 'lp'
+    ? inspector.method_id : null
+  const manuscriptRows = rows.map((r) => ({
+    x: Number(r[featureConfig.rawKey]),
+    y: Number(r[scoreSamplesKey]),
+  }))
+  const manuscriptInputsValid = manuscriptRows.length > 0 && manuscriptRows.every(
+    (r) => Number.isFinite(r.x) && Number.isFinite(r.y)
+  )
+  const manuscriptIsRaw = rows.length > 0 && rows.every(
+    (r) => r[`${scoreColumn}_preprocessing`] === 'raw' || r[`${scoreColumn}_preprocessing`] === 'none'
+  )
+  const figure2ExportConfig = {
+    figureType: 'single_score_iforest' as const,
+    title: `Figure 2 ${featureConfig.label} score vs Isolation Forest score`,
+    filename: `figure2-${featureConfig.label.toLowerCase()}-single-score-iforest`,
+    payload: {
+      method: paperFigure2Method,
+      rho: 0.20,
+      raw_scores: manuscriptIsRaw,
+      rows: manuscriptRows,
+    },
+  }
+
   const rankedExportConfig = {
     figureType: 'line' as const,
     title: 'Ranked abnormality plot (score_samples scale)',
@@ -622,6 +649,18 @@ export default function ScoreInspectorSection({
             </ResponsiveContainer>
           </div>
         </div>
+
+        {paperFigure2Method && (
+          <div className="mb-6 rounded-2xl border border-blue-200 bg-blue-50 p-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-navy">Manuscript Figure 2 — {featureConfig.label} standalone panel</div>
+              <div className="text-xs text-gray-600 mt-1">All edges · raw score vs single-feature Isolation Forest score_samples · ρ = 0.20 · fixed method color · dashed cutoff · no legend or title. Export PDF/PNG separately for LaTeX.</div>
+              {!manuscriptIsRaw && <div className="text-xs text-red-700 mt-1">Run anomaly labeling with Raw / No preprocessing first; transformed IF scores are not eligible for this paper figure.</div>}
+              {!manuscriptInputsValid && <div className="text-xs text-red-700 mt-1">Missing or invalid edge scores; cannot export this panel.</div>}
+            </div>
+            {manuscriptIsRaw && manuscriptInputsValid && <PaperExportButton config={figure2ExportConfig} />}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
           <div className="bg-white rounded-2xl border border-gray-100 p-4">

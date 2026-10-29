@@ -53,7 +53,20 @@
       "path": "C:\\Users\\user\\Desktop\\Master 2- Data Science\\Sem 2\\app\\data\\cache\\scores\\fe2dd29126e03e5b\\pa.csv",
       "rows": 16546,
       "saved_at": "2026-04-23T16:02:30+00:00"
+    },
+    "pa_lp": {
+      "columns": [
+        "source",
+        "target",
+        "weight",
+        "preferential_attachment_1",
+        "local_path_index_1"
+      ],
+      "origin": "derived",
+      "path": "C:\\Users\\user\\Desktop\\Master 2- Data Science\\Sem 2\\app\\data\\cache\\scores\\fe2dd29126e03e5b\\pa_lp.csv",
+      "rows": 16546,
+      "saved_at": "2026-05-02T14:03:55+00:00"
     }
   },
-  "updated_at": "2026-04-23T16:40:18+00:00"
+  "updated_at": "2026-05-02T14:03:56+00:00"
 }

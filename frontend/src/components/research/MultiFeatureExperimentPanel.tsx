@@ -11,9 +11,13 @@ import type {
   MultiFeatureExperimentResponse,
   MultiFeatureQuadrantCount,
   MultiFeatureScalingMode,
+  RegionConfig,
   ScoreCacheStatusResponse,
 } from '../../types'
 import MultiFeatureGraphPanel from './MultiFeatureGraphPanel'
+import { exportFingerprintPng } from './exportFingerprintPng'
+import ScatterComparisonPlot from './ScatterComparisonPlot'
+import MultiFeatureNoveltyCard from './MultiFeatureNoveltyCard'
 
 interface DatasetOption {
   id: string
@@ -316,14 +320,16 @@ function percentText(value: number | undefined) {
   return `${value ?? 0}%`
 }
 
-function regionDisplay(region: string) {
+function regionDisplay(region: string, config?: RegionConfig) {
+  const highPct = config ? Math.round(config.high_pct * 100) : 10
+  const lowPct = config ? Math.round(config.low_pct * 100) : 10
   switch (region) {
     case 'high':
-      return 'High 10%'
+      return `High ${highPct}%`
     case 'low':
-      return 'Low 10%'
+      return `Low ${lowPct}%`
     default:
-      return 'Middle 80%'
+      return `Middle ${100 - highPct - lowPct}%`
   }
 }
 
@@ -331,15 +337,20 @@ function BalanceBar({
   title,
   balance,
   accent,
+  regionConfig,
 }: {
   title: string
   balance: MultiFeatureExperimentResponse['multi_feature_profile']['pa_score_balance']
   accent: 'pa' | 'lp'
+  regionConfig?: RegionConfig
 }) {
+  const highPct = regionConfig ? Math.round(regionConfig.high_pct * 100) : 10
+  const lowPct = regionConfig ? Math.round(regionConfig.low_pct * 100) : 10
+  const midPct = 100 - highPct - lowPct
   const segments = [
-    { label: 'Low 10%', pct: balance.bottom_10_pct, count: balance.bottom_10_count, className: accent === 'pa' ? 'bg-violet-200' : 'bg-orange-200' },
-    { label: 'Middle 80%', pct: balance.middle_80_pct, count: balance.middle_80_count, className: accent === 'pa' ? 'bg-violet-500' : 'bg-orange-500' },
-    { label: 'High 10%', pct: balance.top_10_pct, count: balance.top_10_count, className: accent === 'pa' ? 'bg-violet-800' : 'bg-orange-800' },
+    { label: `Low ${lowPct}%`, pct: balance.bottom_10_pct, count: balance.bottom_10_count, className: accent === 'pa' ? 'bg-violet-200' : 'bg-orange-200' },
+    { label: `Middle ${midPct}%`, pct: balance.middle_80_pct, count: balance.middle_80_count, className: accent === 'pa' ? 'bg-violet-500' : 'bg-orange-500' },
+    { label: `High ${highPct}%`, pct: balance.top_10_pct, count: balance.top_10_count, className: accent === 'pa' ? 'bg-violet-800' : 'bg-orange-800' },
   ]
 
   return (
@@ -378,8 +389,14 @@ function BalanceBar({
 
 function MultiFeatureCompositionVisual({
   profile,
+  regionConfig,
+  datasetLabel,
+  retention,
 }: {
   profile: MultiFeatureExperimentResponse['multi_feature_profile']
+  regionConfig?: RegionConfig
+  datasetLabel: string
+  retention: number
 }) {
   const maxCell = Math.max(...profile.joint_grid.map((cell) => cell.selected_count), 1)
   const regionOrder = ['high', 'middle', 'low']
@@ -397,14 +414,20 @@ function MultiFeatureCompositionVisual({
             This visual looks only at the edges selected by the multi-feature PA+LP Isolation Forest, then shows whether those edges came from high, low, or middle PA and LP score regions.
           </div>
         </div>
-        <div className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">
-          {profile.selected_total} PA+LP backbone edges
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">
+            {profile.selected_total} PA+LP backbone edges
+          </div>
+          <button type="button" onClick={() => exportFingerprintPng({ profile, regionConfig, datasetLabel, retention })}
+            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900">
+            Export publication heatmap PNG
+          </button>
         </div>
       </div>
 
       <div className="grid xl:grid-cols-2 gap-5">
-        <BalanceBar title="Where PA+LP edges fall in the PA score distribution" balance={profile.pa_score_balance} accent="pa" />
-        <BalanceBar title="Where PA+LP edges fall in the LP score distribution" balance={profile.lp_score_balance} accent="lp" />
+        <BalanceBar title="Where PA+LP edges fall in the PA score distribution" balance={profile.pa_score_balance} accent="pa" regionConfig={regionConfig} />
+        <BalanceBar title="Where PA+LP edges fall in the LP score distribution" balance={profile.lp_score_balance} accent="lp" regionConfig={regionConfig} />
       </div>
 
       <div className="grid xl:grid-cols-[320px,minmax(0,1fr)] gap-5 items-start">
@@ -420,14 +443,14 @@ function MultiFeatureCompositionVisual({
             <div />
             {regionOrder.map((lpRegion) => (
               <div key={lpRegion} className="text-center text-xs font-semibold uppercase tracking-wide text-orange-600">
-                LP {regionDisplay(lpRegion)}
+                LP {regionDisplay(lpRegion, regionConfig)}
               </div>
             ))}
 
             {regionOrder.map((paRegion) => (
               <React.Fragment key={paRegion}>
                 <div className="flex items-center justify-end pr-2 text-xs font-semibold uppercase tracking-wide text-violet-600">
-                  PA {regionDisplay(paRegion)}
+                  PA {regionDisplay(paRegion, regionConfig)}
                 </div>
                 {regionOrder.map((lpRegion) => {
                   const cell = findCell(paRegion, lpRegion)
@@ -550,6 +573,8 @@ export default function MultiFeatureExperimentPanel() {
   const [scoreSource, setScoreSource] = useState<ContaminationScoreSource>('auto')
   const [cacheStatus, setCacheStatus] = useState<ScoreCacheStatusResponse | null>(null)
   const [scalingMode, setScalingMode] = useState<MultiFeatureScalingMode>('none')
+  const [highRegionPct, setHighRegionPct] = useState('10')
+  const [lowRegionPct, setLowRegionPct] = useState('10')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<MultiFeatureExperimentResponse | null>(null)
@@ -596,6 +621,8 @@ export default function MultiFeatureExperimentPanel() {
         sessionId,
         isCustom: datasetSelection.isCustom,
         scalingMode,
+        highRegionPct: parseFloat(highRegionPct) || 10,
+        lowRegionPct: parseFloat(lowRegionPct) || 10,
       })
       setResult(response)
     } catch (err: any) {
@@ -666,6 +693,42 @@ export default function MultiFeatureExperimentPanel() {
               <option value="minmax">Min-Max scaling</option>
             </select>
           </div>
+
+          <div>
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Extreme region percentages</div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <div className="text-[11px] text-gray-500 mb-1">High Region %</div>
+                <input
+                  type="number"
+                  min="1"
+                  max="49"
+                  value={highRegionPct}
+                  onChange={(e) => setHighRegionPct(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <div className="text-[11px] text-gray-500 mb-1">Low Region %</div>
+                <input
+                  type="number"
+                  min="1"
+                  max="49"
+                  value={lowRegionPct}
+                  onChange={(e) => setLowRegionPct(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+            <div className="mt-2 text-[11px] text-gray-500">
+              Middle Region: <strong>{100 - (parseFloat(highRegionPct) || 10) - (parseFloat(lowRegionPct) || 10)}%</strong>
+            </div>
+            {(parseFloat(highRegionPct) || 0) + (parseFloat(lowRegionPct) || 0) >= 100 && (
+              <div className="mt-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                High + Low must be less than 100%.
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="rounded-2xl border border-blue-100 bg-blue-50 p-5">
@@ -726,26 +789,33 @@ export default function MultiFeatureExperimentPanel() {
             </div>
           </div>
 
-          <MultiFeatureCompositionVisual profile={result.multi_feature_profile} />
+          <MultiFeatureCompositionVisual profile={result.multi_feature_profile} regionConfig={result.region_config} datasetLabel={result.dataset_label || result.dataset_id} retention={result.cases.pa_lp.metrics.edge_fraction} />
 
           <div className="space-y-5">
+            {(() => {
+              const rc = result.region_config
+              const highPct = Math.round(rc.high_pct * 100)
+              const lowPct = Math.round(rc.low_pct * 100)
+              const midPct = Math.round(rc.middle_pct * 100)
+              return (
+                <>
             <div className="grid xl:grid-cols-2 gap-6">
               <div className="space-y-4">
                 <div className="grid md:grid-cols-3 gap-4">
                 <StatCard
-                  label="PA selected in top 10%"
+                  label={`PA selected in top ${highPct}%`}
                   value={`${result.cases.pa.extremes?.selection_balance.top_10_pct ?? 0}%`}
                   sub={`${result.cases.pa.extremes?.selection_balance.top_10_count ?? 0} of ${result.cases.pa.extremes?.selection_balance.selected_total ?? 0} PA edges`}
                 />
 
                 <StatCard
-                  label="PA selected in bottom 10%"
+                  label={`PA selected in bottom ${lowPct}%`}
                   value={`${result.cases.pa.extremes?.selection_balance.bottom_10_pct ?? 0}%`}
                   sub={`${result.cases.pa.extremes?.selection_balance.bottom_10_count ?? 0} of ${result.cases.pa.extremes?.selection_balance.selected_total ?? 0} PA edges`}
                 />
 
                 <StatCard
-                  label="PA selected in middle 80%"
+                  label={`PA selected in middle ${midPct}%`}
                   value={`${result.cases.pa.extremes?.selection_balance.middle_80_pct ?? 0}%`}
                   sub={`${result.cases.pa.extremes?.selection_balance.middle_80_count ?? 0} of ${result.cases.pa.extremes?.selection_balance.selected_total ?? 0} PA edges`}
                 />
@@ -758,19 +828,19 @@ export default function MultiFeatureExperimentPanel() {
             <div className="space-y-4">
               <div className="grid md:grid-cols-3 gap-4">
                 <StatCard
-                    label="LP selected in top 10%"
+                    label={`LP selected in top ${highPct}%`}
                     value={`${result.cases.lp.extremes?.selection_balance.top_10_pct ?? 0}%`}
                     sub={`${result.cases.lp.extremes?.selection_balance.top_10_count ?? 0} of ${result.cases.lp.extremes?.selection_balance.selected_total ?? 0} LP edges`}
                   />
 
                   <StatCard
-                    label="LP selected in bottom 10%"
+                    label={`LP selected in bottom ${lowPct}%`}
                     value={`${result.cases.lp.extremes?.selection_balance.bottom_10_pct ?? 0}%`}
                     sub={`${result.cases.lp.extremes?.selection_balance.bottom_10_count ?? 0} of ${result.cases.lp.extremes?.selection_balance.selected_total ?? 0} LP edges`}
                   />
 
                   <StatCard
-                    label="LP selected in middle 80%"
+                    label={`LP selected in middle ${midPct}%`}
                     value={`${result.cases.lp.extremes?.selection_balance.middle_80_pct ?? 0}%`}
                     sub={`${result.cases.lp.extremes?.selection_balance.middle_80_count ?? 0} of ${result.cases.lp.extremes?.selection_balance.selected_total ?? 0} LP edges`}
                   />
@@ -779,9 +849,14 @@ export default function MultiFeatureExperimentPanel() {
               <ExtremeTable title="LP lowest-score edges" rows={result.cases.lp.extremes?.lowest ?? []} primaryMethod="lp" />
             </div>
             </div>
-          </div>
+                </>
+              )
+            })()}
+            </div>
 
           <ScatterPlot points={result.scatter.points} quadrantCounts={result.scatter.quadrant_counts} />
+
+          <ScatterComparisonPlot data={result.scatter_3d} />
 
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
             <div>
@@ -819,6 +894,12 @@ export default function MultiFeatureExperimentPanel() {
 
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
               <div className="text-lg font-bold text-navy mb-4">Common and unique structure</div>
+              <MultiFeatureNoveltyCard
+                novelty={result.overlap.multifeature_novelty}
+                datasetId={result.dataset_id}
+                datasetLabel={result.dataset_label}
+                retention={result.cases.pa_lp.metrics.edge_fraction}
+              />
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="rounded-xl border border-gray-100 p-4">
                   <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Edges</div>

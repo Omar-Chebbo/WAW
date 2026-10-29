@@ -36,8 +36,6 @@ PAPER_RC = {
     'font.serif': ['STIXGeneral', 'Times New Roman', 'DejaVu Serif'],
     'mathtext.fontset': 'stix',
     'axes.unicode_minus': False,
-    'savefig.bbox': 'tight',
-    'savefig.pad_inches': 0.08,
     'pdf.fonttype': 42,
     'ps.fonttype': 42,
     'svg.fonttype': 'none',
@@ -82,14 +80,20 @@ def _series_color(series: dict[str, Any], default: str = ACCENT) -> str:
 def _save_figure(fig, fmt: str) -> bytes:
     buf = io.BytesIO()
     fmt = fmt.lower()
+    # Use tight bbox with padding so legends / annotations placed outside
+    # axes (via bbox_to_anchor) are always included.  Without tight bbox
+    # such content overflows the page and produces an invalid / corrupt PDF
+    # that Adobe Acrobat cannot open.
+    savefig_kw: dict[str, Any] = {'bbox_inches': 'tight', 'pad_inches': 0.15}
     if fmt == 'png':
-        fig.savefig(buf, format='png', dpi=600)
+        fig.savefig(buf, format='png', dpi=600, **savefig_kw)
     elif fmt == 'svg':
-        fig.savefig(buf, format='svg')
+        fig.savefig(buf, format='svg', **savefig_kw)
     elif fmt == 'pdf':
-        fig.savefig(buf, format='pdf')
+        fig.savefig(buf, format='pdf', metadata={'Date': None}, **savefig_kw)
     else:
         raise ValueError(f'Unsupported export format: {fmt}')
+    buf.flush()
     plt.close(fig)
     buf.seek(0)
     return buf.read()
@@ -185,7 +189,9 @@ def _style_axes(ax, *, x_label: str | None = None, y_label: str | None = None, g
 def _apply_title(fig, title: str | None, subtitle: str | None = None):
     # Subtitle intentionally disabled for exported figures.
     if title:
-        fig.suptitle(title, x=0.08, y=0.98, ha='left', va='top', fontsize=11.5, fontweight='bold', color=TEXT)
+        # y=0.95 keeps the title safely within the figure boundary
+        # (previously 0.98 caused clipping when bbox_inches is not tight)
+        fig.suptitle(title, x=0.08, y=0.95, ha='left', va='top', fontsize=11.5, fontweight='bold', color=TEXT)
 
 
 def _legend_above(ax, ncol: int = 2, *, y: float = 1.10):
@@ -259,9 +265,10 @@ def render_histogram(payload: dict[str, Any], fmt: str) -> bytes:
     normal = np.array([_safe_float(row.get(normal_key)) for row in bins], dtype=float) if bins else np.array([])
     total = np.array([_safe_float(row.get(total_key, row.get('count'))) for row in bins], dtype=float) if bins else np.array([])
 
-    fig, ax = plt.subplots(figsize=(6.8, 4.4))
+    fig, ax = plt.subplots(figsize=(6.8, 4.8))
     _apply_title(fig, title, payload.get('subtitle'))
-    _reserve_paper_margins(fig, top=0.83, bottom=0.16, left=0.12, right=0.98)
+    # top=0.88 ensures the legend (at bbox y=1.06) fits within the figure
+    _reserve_paper_margins(fig, top=0.88, bottom=0.16, left=0.12, right=0.98)
     has_split = len(anomaly) and (anomaly.sum() > 0 or normal.sum() > 0)
 
     if has_split:
@@ -293,9 +300,10 @@ def render_bar(payload: dict[str, Any], fmt: str) -> bytes:
     x_labels = [str(row.get(x_key, '')) for row in rows]
 
     fig_w = max(6.8, min(10.5, 1.0 + 0.58 * max(len(x_labels), 4)))
-    fig, ax = plt.subplots(figsize=(fig_w, 4.4))
+    fig, ax = plt.subplots(figsize=(fig_w, 4.8))
     _apply_title(fig, title, payload.get('subtitle'))
-    _reserve_paper_margins(fig, top=0.83, bottom=0.22 if not horizontal else 0.14, left=0.13 if horizontal else 0.10, right=0.98)
+    # top=0.88 ensures the legend (at bbox y=1.06) fits within the figure
+    _reserve_paper_margins(fig, top=0.88, bottom=0.22 if not horizontal else 0.14, left=0.13 if horizontal else 0.10, right=0.98)
     indices = np.arange(len(rows))
 
     if not series:
@@ -338,9 +346,10 @@ def render_line(payload: dict[str, Any], fmt: str) -> bytes:
     x_label = payload.get('x_label', x_key)
     y_label = payload.get('y_label', 'Value')
     x_values = [row.get(x_key) for row in rows]
-    fig, ax = plt.subplots(figsize=(6.8, 4.3))
+    fig, ax = plt.subplots(figsize=(6.8, 4.8))
     _apply_title(fig, title, payload.get('subtitle'))
-    _reserve_paper_margins(fig, top=0.83, bottom=0.16, left=0.12, right=0.98)
+    # top=0.88 ensures the legend (at bbox y=1.06) fits within the figure
+    _reserve_paper_margins(fig, top=0.88, bottom=0.16, left=0.12, right=0.98)
     categorical = any(isinstance(v, str) for v in x_values)
     plotted_any = False
     for i, spec in enumerate(series):
@@ -371,6 +380,18 @@ def render_line(payload: dict[str, Any], fmt: str) -> bytes:
     return _finalize(fig, fmt)
 
 
+def _is_background_label(label: str) -> bool:
+    """Check if a group label represents non-backbone / background points."""
+    return label.lower().strip() in {'not selected', 'normal', 'non-backbone', 'non_backbone', 'non selected', 'not_selected'}
+
+
+def _normalize_bg_label(label: str) -> str:
+    """Map various background labels to a canonical 'Non-backbone' for the legend."""
+    if _is_background_label(label):
+        return 'Non-backbone'
+    return label
+
+
 def render_scatter(payload: dict[str, Any], fmt: str) -> bytes:
     _apply_style()
     title = payload.get('title', 'Scatter plot')
@@ -381,35 +402,203 @@ def render_scatter(payload: dict[str, Any], fmt: str) -> bytes:
     groups = payload.get('groups', [])
     x_label = payload.get('x_label', x_key)
     y_label = payload.get('y_label', y_key)
-    fig, ax = plt.subplots(figsize=(6.8, 4.6))
+    is_pdf = fmt.lower() == 'pdf'
+    # Use a larger figure for PDF to match the visual quality of the Plotly PNG export
+    fig_width = 8.5 if is_pdf else 6.8
+    fig_height = 6.0 if is_pdf else 4.6
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     _apply_title(fig, title, payload.get('subtitle'))
-    top_margin = 0.77 if payload.get('subtitle') else 0.81
-    _reserve_paper_margins(fig, top=top_margin, bottom=0.16, left=0.12, right=0.82 if group_key else 0.98)
+    top_margin = 0.82 if payload.get('subtitle') else 0.85
+    # Wider margins for PDF to accommodate larger labels
+    if is_pdf:
+        _reserve_paper_margins(fig, top=top_margin, bottom=0.11, left=0.10, right=0.96)
+    else:
+        _reserve_paper_margins(fig, top=top_margin, bottom=0.16, left=0.12, right=0.96)
+    # For PDF: scale up marker sizes and font sizes to match Plotly interactive quality
+    size_scale = 3.5 if is_pdf else 1.0
+    font_scale = 1.45 if is_pdf else 1.0
     if group_key:
         values = {row.get(group_key) for row in rows}
         if not groups:
             groups = [{'value': value, 'label': str(value), 'color': PALETTE[i % len(PALETTE)]} for i, value in enumerate(sorted(values, key=lambda x: str(x)))]
-        ordered = sorted(groups, key=lambda g: 0 if str(g.get('value', '')).lower() in {'not selected', 'normal'} else 1)
+        # --- Identify background (non-backbone / non-selected / normal) groups ---
+        # Draw background FIRST so backbone points are rendered on top.
+        ordered = sorted(groups, key=lambda g: 0 if _is_background_label(str(g.get('label', g.get('value', '')))) else 1)
         for i, spec in enumerate(ordered):
             filtered = [row for row in rows if row.get(group_key) == spec['value']]
             if not filtered:
                 continue
             xs = [_safe_float(r.get(x_key)) for r in filtered]
             ys = [_safe_float(r.get(y_key)) for r in filtered]
-            is_background = str(spec.get('label', spec.get('value', ''))).lower() == 'not selected'
-            ax.scatter(xs, ys, s=18 if is_background else 30, alpha=0.45 if is_background else 0.85, color=spec.get('color', PALETTE[i % len(PALETTE)]), label=spec.get('label', spec['value']), edgecolors='none', linewidths=0, zorder=2 if is_background else 3)
-        ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1.0), frameon=False, fontsize=8.2, borderaxespad=0.0, handletextpad=0.4)
+            is_background = _is_background_label(str(spec.get('label', spec.get('value', ''))))
+            n_points = len(filtered)
+            # Use a canonical legend label so the legend always reads "Non-backbone"
+            # instead of the raw frontend label like "not selected".
+            legend_label = _normalize_bg_label(str(spec.get('label', spec['value'])))
+            if is_background:
+                # Non-backbone points: clearly visible medium-gray markers with a
+                # thin white outline so they remain distinguishable even where
+                # backbone dots overlap them.
+                marker_size = 16 * size_scale
+                alpha_val = 0.78
+                bg_color = spec.get('color')
+                if not bg_color or bg_color == ACCENT:
+                    bg_color = '#78909C'
+                point_color = bg_color
+                draw_zorder = 2  # behind backbone
+                edge_color = 'white'
+                edge_width = 0.4
+            else:
+                marker_size = 22 * size_scale
+                alpha_val = 0.92
+                point_color = spec.get('color', PALETTE[i % len(PALETTE)])
+                draw_zorder = 3  # on top
+                edge_color = 'white'
+                edge_width = 0.3
+            # For PDF with many points, rasterize to avoid bloated vector output
+            rasterize = is_pdf and n_points > 2000
+            ax.scatter(xs, ys, s=marker_size, alpha=alpha_val, color=point_color, label=legend_label, edgecolors=edge_color, linewidths=edge_width, zorder=draw_zorder, rasterized=rasterize)
+        legend_fontsize = 10.0 * font_scale
+        # Legend on the right side of the plot (outside axes).
+        # bbox_inches='tight' in _save_figure ensures this is captured in the PDF.
+        ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1.0), frameon=True, fontsize=legend_fontsize, borderaxespad=0.4, handletextpad=0.5, edgecolor='#CBD5E1', fancybox=True, shadow=False)
     else:
-        ax.scatter([_safe_float(r.get(x_key)) for r in rows], [_safe_float(r.get(y_key)) for r in rows], s=34, alpha=0.82, color=payload.get('accent_color', ACCENT), edgecolors='none', linewidths=0, zorder=3)
+        ax.scatter([_safe_float(r.get(x_key)) for r in rows], [_safe_float(r.get(y_key)) for r in rows], s=34 * size_scale, alpha=0.85, color=payload.get('accent_color', ACCENT), edgecolors='none', linewidths=0, zorder=3, rasterized=is_pdf and len(rows) > 2000)
     if payload.get('vline_x') is not None:
         ax.axvline(_safe_float(payload['vline_x']), color='#64748B', linestyle='--', linewidth=1.0, zorder=2)
     if payload.get('hline_y') is not None:
         ax.axhline(_safe_float(payload['hline_y']), color='#64748B', linestyle='--', linewidth=1.0, zorder=2)
     _style_axes(ax, x_label=x_label, y_label=y_label, grid_axis='both')
+    # Scale tick label sizes for PDF
+    if is_pdf:
+        ax.tick_params(axis='both', labelsize=9.5 * font_scale)
+        ax.xaxis.label.set_fontsize(11.5 * font_scale)
+        ax.yaxis.label.set_fontsize(11.5 * font_scale)
     ax.xaxis.set_major_formatter(FuncFormatter(_human_tick))
     ax.yaxis.set_major_formatter(FuncFormatter(_human_tick))
     _maybe_symlog(ax, np.asarray([_safe_float(r.get(x_key)) for r in rows], dtype=float), 'x')
     _maybe_symlog(ax, np.asarray([_safe_float(r.get(y_key)) for r in rows], dtype=float), 'y')
+    return _finalize(fig, fmt)
+
+# Manuscript Figure 2: one standalone panel, assembled with LaTeX later.
+# The raw PA/LP values and *single-feature* sklearn score_samples are used.
+FIGURE2_COLORS = {'pa': '#1D4ED8', 'lp': '#B45309'}
+
+
+def render_paper_score_scatter(payload: dict[str, Any], fmt: str) -> bytes:
+    _apply_style()
+    method = str(payload.get('method', '')).lower()
+    if method not in FIGURE2_COLORS:
+        raise ValueError('paper_score_scatter requires method pa or lp')
+    rows = payload.get('rows', [])
+    if not isinstance(rows, list) or not rows:
+        raise ValueError('paper_score_scatter requires rows')
+    x_key = payload.get('x_key', 'x')
+    y_key = payload.get('y_key', 'y')
+    x_label = payload.get('x_label', x_key)
+    y_label = payload.get('y_label', y_key)
+    rho = float(payload.get('rho', 0.20))
+    if not (0 < rho <= 0.5):
+        raise ValueError('rho must be in (0, 0.5]')
+    anomaly_direction = str(payload.get('anomaly_direction', 'high')).lower()
+    if anomaly_direction not in {'high', 'low'}:
+        raise ValueError('anomaly_direction must be high or low')
+    coords = []
+    for idx, row in enumerate(rows):
+        try:
+            x, y = float(row[x_key]), float(row[y_key])
+        except (ValueError, TypeError, KeyError) as exc:
+            raise ValueError(f'Invalid score for scatter row {idx}: {exc}') from exc
+        if not math.isfinite(x) or not math.isfinite(y):
+            raise ValueError(f'Nonfinite score at scatter row {idx}')
+        coords.append((x, y))
+    coords = np.asarray(coords, dtype=float)
+    count = max(1, int(math.ceil(rho * len(coords))))
+    if anomaly_direction == 'high':
+        ordered = np.argsort(-coords[:, 1], kind='mergesort')
+    else:
+        ordered = np.argsort(coords[:, 1], kind='mergesort')
+    cutoff = float(coords[ordered[count - 1], 1])
+    fig, ax = plt.subplots(figsize=(4.4, 3.15))
+    fig.subplots_adjust(left=0.19, right=0.97, bottom=0.20, top=0.96)
+    point_count = len(coords)
+    if point_count >= 12000:
+        marker_size, alpha_val = 3.4, 0.20
+    elif point_count >= 6000:
+        marker_size, alpha_val = 4.4, 0.26
+    elif point_count >= 2500:
+        marker_size, alpha_val = 5.4, 0.34
+    else:
+        marker_size, alpha_val = 7.0, 0.48
+    ax.scatter(coords[:, 0], coords[:, 1], s=marker_size, alpha=alpha_val,
+               color=FIGURE2_COLORS[method], marker='o', linewidths=0, edgecolors='none',
+               rasterized=(fmt.lower() == 'pdf' and point_count > 4000))
+    ax.axhline(cutoff, linestyle='--', color='#374151', linewidth=1.15, zorder=4)
+    ax.set_xlabel(x_label, fontsize=10)
+    ax.set_ylabel(y_label, fontsize=10)
+    ax.tick_params(labelsize=8.5)
+    ax.spines[['top', 'right']].set_visible(False)
+    ax.grid(False)
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=5))
+    ax.xaxis.set_major_formatter(FuncFormatter(_human_tick))
+    ax.yaxis.set_major_formatter(FuncFormatter(_human_tick))
+    return _finalize(fig, fmt)
+
+
+def render_single_score_iforest(payload: dict[str, Any], fmt: str) -> bytes:
+    _apply_style()
+    method = str(payload.get('method', '')).lower()
+    if method not in FIGURE2_COLORS:
+        raise ValueError('Figure 2 accepts only single-feature method pa or lp, not PA+LP')
+    rho = float(payload.get('rho', 0.20))
+    if not (0 < rho <= 0.5):
+        raise ValueError('rho must be in (0, 0.5]')
+    if not payload.get('raw_scores', True):
+        raise ValueError('Figure 2 requires raw, untransformed scores for model fitting')
+    rows = payload.get('rows', [])
+    if not isinstance(rows, list) or not rows:
+        raise ValueError('Figure 2 requires all observed edge rows')
+    coords = []
+    for idx, row in enumerate(rows):
+        try:
+            x, y = float(row['x']), float(row['y'])
+        except (ValueError, TypeError, KeyError) as exc:
+            raise ValueError(f'Invalid score for edge row {idx}: {exc}') from exc
+        if not math.isfinite(x) or not math.isfinite(y):
+            raise ValueError(f'Nonfinite score at edge row {idx}')
+        coords.append((x, y))
+    coords = np.asarray(coords, dtype=float)
+    # Deterministic stable ranking matches anomaly.py and keeps exactly ceil(rho * m).
+    # Tied y-scores remain indistinguishable from the horizontal line alone.
+    count = max(1, int(math.ceil(rho * len(coords))))
+    ordered = np.argsort(coords[:, 1], kind='mergesort')
+    cutoff = float(coords[ordered[count - 1], 1])
+    fig, ax = plt.subplots(figsize=(4.4, 3.15))
+    fig.subplots_adjust(left=0.19, right=0.97, bottom=0.20, top=0.96)
+    point_count = len(coords)
+    if point_count >= 12000:
+        marker_size, alpha_val = 3.4, 0.20
+    elif point_count >= 6000:
+        marker_size, alpha_val = 4.4, 0.26
+    elif point_count >= 2500:
+        marker_size, alpha_val = 5.4, 0.34
+    else:
+        marker_size, alpha_val = 7.0, 0.48
+    ax.scatter(coords[:, 0], coords[:, 1], s=marker_size, alpha=alpha_val,
+               color=FIGURE2_COLORS[method], marker='o', linewidths=0, edgecolors='none',
+               rasterized=(fmt.lower() == 'pdf' and len(coords) > 4000))
+    ax.axhline(cutoff, linestyle='--', color='#374151', linewidth=1.15, zorder=4)
+    ax.set_xlabel('PA score' if method == 'pa' else 'LP score', fontsize=10)
+    ax.set_ylabel('Isolation Forest score', fontsize=10)
+    ax.tick_params(labelsize=8.5)
+    ax.spines[['top', 'right']].set_visible(False)
+    ax.grid(False)
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=5))
+    ax.ticklabel_format(axis='x', style='sci', scilimits=(-3, 4), useMathText=True)
+    # No point categories, legend, panel letters, row/column names or title:
+    # manuscript layout supplies the latter labels.
     return _finalize(fig, fmt)
 
 
@@ -419,9 +608,10 @@ def render_ccdf(payload: dict[str, Any], fmt: str) -> bytes:
     series = payload.get('series', [])
     x_label = payload.get('x_label', 'x')
     y_label = payload.get('y_label', 'P(X ≥ x)')
-    fig, ax = plt.subplots(figsize=(6.8, 4.5))
+    fig, ax = plt.subplots(figsize=(6.8, 5.0))
     _apply_title(fig, title, payload.get('subtitle'))
-    _reserve_paper_margins(fig, top=0.81, bottom=0.15, left=0.12, right=0.98)
+    # top=0.88 ensures the legend (at bbox y=1.07) fits within the figure
+    _reserve_paper_margins(fig, top=0.88, bottom=0.15, left=0.12, right=0.98)
     for i, spec in enumerate(series):
         points = spec.get('points', [])
         x = np.array([_safe_float(p.get('x'), np.nan) for p in points], dtype=float)
@@ -493,15 +683,17 @@ def _draw_graph(
 
     for u, v in g.edges():
         attrs = g[u][v]
+        # Use truthiness checks instead of `is True` to handle both
+        # Python bool and integer 1/0 (which can arrive from JSON payloads).
         if edge_style_mode == 'score_extremes':
-            if attrs.get('score_region') == 'low' or attrs.get('is_low_score') is True:
+            if attrs.get('score_region') == 'low' or attrs.get('is_low_score'):
                 low_edges.append((u, v))
-            elif attrs.get('score_region') == 'high' or attrs.get('is_high_score') is True:
+            elif attrs.get('score_region') == 'high' or attrs.get('is_high_score'):
                 high_edges.append((u, v))
             else:
                 normal_edges.append((u, v))
         elif edge_style_mode == 'if_backbone':
-            if attrs.get('is_if_backbone') is True:
+            if attrs.get('is_if_backbone'):
                 if_edges.append((u, v))
             else:
                 normal_edges.append((u, v))
@@ -513,25 +705,34 @@ def _draw_graph(
     def widths(edgelist, base=0.35, span=1.5):
         return [base + span * (g[u][v].get('weight', 1.0) / max_w) for u, v in edgelist]
 
+    def _set_zorder(artist, z):
+        """NetworkX 3.6+ does not pass zorder to matplotlib collections;
+        set it on the returned artist after drawing."""
+        if artist is not None:
+            try:
+                artist.set_zorder(z)
+            except Exception:
+                pass
+
+    # --- Draw edges (zorder=1 normal, zorder=2 highlighted, nodes on top at 3) ---
     if normal_edges:
-        nx.draw_networkx_edges(
+        _set_zorder(nx.draw_networkx_edges(
             g,
             positions,
             edgelist=normal_edges,
             ax=ax,
-            edge_color='#000000' if edge_style_mode in {'score_extremes', 'if_backbone'} else '#8FB4AA',
-            alpha=1.0 if edge_style_mode in {'score_extremes', 'if_backbone'} else 0.55,
-            width=widths(normal_edges, base=0.18 if large_graph else 0.45, span=0.55 if large_graph else 1.6),
-
-        )
+            edge_color='#94A3B8' if edge_style_mode in {'score_extremes', 'if_backbone'} else '#8FB4AA',
+            alpha=0.78 if edge_style_mode in {'score_extremes', 'if_backbone'} else 0.65,
+            width=widths(normal_edges, base=0.22 if large_graph else 0.55, span=0.65 if large_graph else 1.8),
+        ), 1)
     if low_edges:
-        nx.draw_networkx_edges(g, positions, edgelist=low_edges, ax=ax, edge_color='#2563EB', alpha=1.0, width=widths(low_edges, base=0.45 if large_graph else 0.70, span=1.15 if large_graph else 2.0))
+        _set_zorder(nx.draw_networkx_edges(g, positions, edgelist=low_edges, ax=ax, edge_color='#2563EB', alpha=1.0, width=widths(low_edges, base=0.45 if large_graph else 0.70, span=1.15 if large_graph else 2.0)), 2)
     if high_edges:
-        nx.draw_networkx_edges(g, positions, edgelist=high_edges, ax=ax, edge_color='#DC2626', alpha=1.0, width=widths(high_edges, base=0.45 if large_graph else 0.70, span=1.15 if large_graph else 2.0))
+        _set_zorder(nx.draw_networkx_edges(g, positions, edgelist=high_edges, ax=ax, edge_color='#DC2626', alpha=1.0, width=widths(high_edges, base=0.45 if large_graph else 0.70, span=1.15 if large_graph else 2.0)), 2)
     if if_edges:
-        nx.draw_networkx_edges(g, positions, edgelist=if_edges, ax=ax, edge_color='#7C3AED', alpha=1.0, width=widths(if_edges, base=0.50 if large_graph else 0.75, span=1.25 if large_graph else 2.2))
+        _set_zorder(nx.draw_networkx_edges(g, positions, edgelist=if_edges, ax=ax, edge_color='#7C3AED', alpha=1.0, width=widths(if_edges, base=0.50 if large_graph else 0.75, span=1.25 if large_graph else 2.2)), 2)
     if highlighted:
-        nx.draw_networkx_edges(
+        _set_zorder(nx.draw_networkx_edges(
             g,
             positions,
             edgelist=highlighted,
@@ -539,8 +740,9 @@ def _draw_graph(
             edge_color=accent_color,
             alpha=0.92,
             width=widths(highlighted, base=1.0, span=2.6),
-        )
+        ), 2)
 
+    # --- Draw nodes on top of all edges (zorder=3) ---
     nodes_artist = nx.draw_networkx_nodes(
         g,
         positions,
@@ -552,6 +754,7 @@ def _draw_graph(
         linewidths=0.15 if large_graph else 0.9,
         alpha=0.70 if large_graph else 0.86,
     )
+    _set_zorder(nodes_artist, 3)
 
     if show_labels and not large_graph:
         cmap = plt.cm.Blues
@@ -590,9 +793,9 @@ def _draw_graph(
     if edge_style_mode == 'score_extremes':
         ax.legend(
             handles=[
-                Patch(facecolor='#000000', alpha=1.0, label='Original edges'),
-                Patch(facecolor='#2563EB', label='Lowest 20% score'),
-                Patch(facecolor='#DC2626', label='Highest 20% score'),
+                Patch(facecolor='#94A3B8', edgecolor='#64748B', linewidth=0.5, label='Non-backbone edges'),
+                Patch(facecolor='#2563EB', edgecolor='#1E40AF', linewidth=0.5, label='Lowest 20% score'),
+                Patch(facecolor='#DC2626', edgecolor='#991B1B', linewidth=0.5, label='Highest 20% score'),
             ],
             loc='lower center',
             bbox_to_anchor=(0.5, -0.02),
@@ -602,8 +805,8 @@ def _draw_graph(
     elif edge_style_mode == 'if_backbone':
         ax.legend(
             handles=[
-                Patch(facecolor='#000000', alpha=1.0, label='Original edges'),
-                Patch(facecolor='#7C3AED', label='Isolation Forest backbone'),
+                Patch(facecolor='#94A3B8', edgecolor='#64748B', linewidth=0.5, label='Non-backbone edges'),
+                Patch(facecolor='#7C3AED', edgecolor='#5B21B6', linewidth=0.5, label='Isolation Forest backbone'),
             ],
             loc='lower center',
             bbox_to_anchor=(0.5, -0.02),
@@ -618,9 +821,10 @@ def render_graph(payload: dict[str, Any], fmt: str) -> bytes:
     graph_data = payload.get('graph', payload)
     accent = payload.get('accent_color', '#0F766E')
     highlight_edges = set(payload.get('highlight_edges', []) or [])
-    fig, ax = plt.subplots(figsize=(16.0, 10.0) if payload.get('large_figure', False) else (6.8, 5.2))
+    fig, ax = plt.subplots(figsize=(16.0, 10.0) if payload.get('large_figure', False) else (6.8, 5.6))
     _apply_title(fig, title, payload.get('subtitle'))
-    _reserve_paper_margins(fig, top=0.90, bottom=0.055 if payload.get('edge_style_mode') else 0.025, left=0.015, right=0.985)
+    # Keep generous margins for graph to ensure title and edge-style legends are visible
+    _reserve_paper_margins(fig, top=0.92, bottom=0.06 if payload.get('edge_style_mode') else 0.03, left=0.02, right=0.98)
     nodes_artist = _draw_graph(ax, graph_data, title=title, highlight_edges=highlight_edges, accent_color=accent, show_labels=payload.get('show_labels', True), edge_style_mode=payload.get('edge_style_mode', 'default'))
     if payload.get('show_colorbar', False):
         cbar = fig.colorbar(nodes_artist, ax=ax, fraction=0.03, pad=0.012)
@@ -637,10 +841,11 @@ def render_graph_compare(payload: dict[str, Any], fmt: str) -> bytes:
     right_graph = _build_graph(right.get('graph', right))
     union = nx.compose(left_graph, right_graph)
     positions = _compute_layout(union)
-    fig, axes = plt.subplots(1, 2, figsize=(10.8, 5.2))
-    _reserve_paper_margins(fig, top=0.88, bottom=0.04, left=0.03, right=0.97)
-    n1 = _draw_graph(axes[0], left.get('graph', left), title=left.get('title', 'Left'), highlight_edges=set(left.get('highlight_edges', []) or []), accent_color=left.get('accent_color', '#0F766E'), positions=positions, show_labels=left.get('show_labels', True))
-    n2 = _draw_graph(axes[1], right.get('graph', right), title=right.get('title', 'Right'), highlight_edges=set(right.get('highlight_edges', []) or []), accent_color=right.get('accent_color', '#4338CA'), positions=positions, show_labels=right.get('show_labels', True))
+    fig, axes = plt.subplots(1, 2, figsize=(10.8, 5.8))
+    bottom_margin = 0.08 if (left.get('edge_style_mode') or right.get('edge_style_mode')) else 0.05
+    _reserve_paper_margins(fig, top=0.90, bottom=bottom_margin, left=0.03, right=0.97)
+    n1 = _draw_graph(axes[0], left.get('graph', left), title=left.get('title', 'Left'), highlight_edges=set(left.get('highlight_edges', []) or []), accent_color=left.get('accent_color', '#0F766E'), positions=positions, show_labels=left.get('show_labels', True), edge_style_mode=left.get('edge_style_mode', 'default'))
+    n2 = _draw_graph(axes[1], right.get('graph', right), title=right.get('title', 'Right'), highlight_edges=set(right.get('highlight_edges', []) or []), accent_color=right.get('accent_color', '#4338CA'), positions=positions, show_labels=right.get('show_labels', True), edge_style_mode=right.get('edge_style_mode', 'default'))
     if payload.get('title'):
         _apply_title(fig, payload['title'], payload.get('subtitle'))
     if payload.get('show_colorbar', False):
@@ -674,7 +879,7 @@ def render_table(payload: dict[str, Any], fmt: str) -> bytes:
     fig_w = max(8.5, min(18.0, 1.25 + 1.45 * ncols))
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     _apply_title(fig, title, payload.get('subtitle'))
-    _reserve_paper_margins(fig, top=0.92, bottom=0.04, left=0.03, right=0.97)
+    _reserve_paper_margins(fig, top=0.93, bottom=0.04, left=0.03, right=0.97)
     ax.axis('off')
 
     table = ax.table(cellText=data, colLabels=wrapped_labels, loc='center', cellLoc='left', colLoc='left')
@@ -713,9 +918,10 @@ def render_radar(payload: dict[str, Any], fmt: str) -> bytes:
         raise ValueError('Radar export requires categories.')
     angles = np.linspace(0, 2 * np.pi, len(categories), endpoint=False).tolist()
     angles += angles[:1]
-    fig, ax = plt.subplots(figsize=(6.4, 5.6), subplot_kw=dict(polar=True))
+    fig, ax = plt.subplots(figsize=(6.4, 6.2), subplot_kw=dict(polar=True))
     _apply_title(fig, title, payload.get('subtitle'))
-    _reserve_paper_margins(fig, top=0.82, bottom=0.06, left=0.05, right=0.95)
+    # top=0.88 ensures the legend (at bbox y=1.10) fits within the figure
+    _reserve_paper_margins(fig, top=0.88, bottom=0.06, left=0.05, right=0.95)
     for i, spec in enumerate(series):
         values = [_safe_float(v) for v in spec.get('values', [])]
         values += values[:1]
@@ -737,6 +943,8 @@ RENDERERS = {
     'bar': render_bar,
     'line': render_line,
     'scatter': render_scatter,
+    'single_score_iforest': render_single_score_iforest,
+    'paper_score_scatter': render_paper_score_scatter,
     'ccdf': render_ccdf,
     'graph': render_graph,
     'graph_compare': render_graph_compare,

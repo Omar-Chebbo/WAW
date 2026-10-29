@@ -12,7 +12,7 @@ router = APIRouter()
 
 
 class FigureExportRequest(BaseModel):
-    figure_type: str = Field(..., description='histogram, line, scatter, bar, ccdf, graph, graph_compare, table, radar')
+    figure_type: str = Field(..., description='histogram, line, scatter, single_score_iforest, paper_score_scatter, bar, ccdf, graph, graph_compare, table, radar')
     format: str = Field('pdf', description='png, svg, pdf')
     title: str | None = None
     filename: str | None = None

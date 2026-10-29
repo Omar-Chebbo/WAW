@@ -1,0 +1,72 @@
+{
+  "cache_version": "v1",
+  "dataset_fingerprint": "7eb9873f24961953",
+  "dataset_name": "misere2.csv",
+  "methods": {
+    "df": {
+      "columns": [
+        "source",
+        "target",
+        "disparity_p_value",
+        "weight"
+      ],
+      "origin": "computed",
+      "path": "C:\\Users\\user\\Desktop\\Master 2- Data Science\\Sem 2\\app\\data\\cache\\scores\\7eb9873f24961953\\df.csv",
+      "rows": 254,
+      "saved_at": "2026-08-26T15:51:23+00:00"
+    },
+    "hss": {
+      "columns": [
+        "source",
+        "target",
+        "weight",
+        "distance",
+        "salience",
+        "hss_in_backbone",
+        "hss_score"
+      ],
+      "origin": "computed",
+      "path": "C:\\Users\\user\\Desktop\\Master 2- Data Science\\Sem 2\\app\\data\\cache\\scores\\7eb9873f24961953\\hss.csv",
+      "rows": 254,
+      "saved_at": "2026-08-26T15:51:22+00:00"
+    },
+    "lp": {
+      "columns": [
+        "source",
+        "target",
+        "weight",
+        "local_path_index_1"
+      ],
+      "origin": "computed",
+      "path": "C:\\Users\\user\\Desktop\\Master 2- Data Science\\Sem 2\\app\\data\\cache\\scores\\7eb9873f24961953\\lp.csv",
+      "rows": 254,
+      "saved_at": "2026-05-04T15:08:06+00:00"
+    },
+    "pa": {
+      "columns": [
+        "source",
+        "target",
+        "preferential_attachment_1",
+        "weight"
+      ],
+      "origin": "computed",
+      "path": "C:\\Users\\user\\Desktop\\Master 2- Data Science\\Sem 2\\app\\data\\cache\\scores\\7eb9873f24961953\\pa.csv",
+      "rows": 254,
+      "saved_at": "2026-05-04T15:08:06+00:00"
+    },
+    "pa_lp": {
+      "columns": [
+        "source",
+        "target",
+        "weight",
+        "preferential_attachment_1",
+        "local_path_index_1"
+      ],
+      "origin": "derived",
+      "path": "C:\\Users\\user\\Desktop\\Master 2- Data Science\\Sem 2\\app\\data\\cache\\scores\\7eb9873f24961953\\pa_lp.csv",
+      "rows": 254,
+      "saved_at": "2026-05-04T17:58:11+00:00"
+    }
+  },
+  "updated_at": "2026-08-26T15:51:23+00:00"
+}

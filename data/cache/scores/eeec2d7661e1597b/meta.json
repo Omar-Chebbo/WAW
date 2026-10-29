@@ -1,0 +1,20 @@
+{
+  "cache_version": "v1",
+  "dataset_fingerprint": "eeec2d7661e1597b",
+  "dataset_name": "job_mobility_network_09_10.csv",
+  "methods": {
+    "pa": {
+      "columns": [
+        "source",
+        "target",
+        "preferential_attachment_1",
+        "weight"
+      ],
+      "origin": "computed",
+      "path": "C:\\Users\\user\\Desktop\\Master 2- Data Science\\Sem 2\\app\\data\\cache\\scores\\eeec2d7661e1597b\\pa.csv",
+      "rows": 26448,
+      "saved_at": "2026-10-14T14:52:05+00:00"
+    }
+  },
+  "updated_at": "2026-10-14T14:52:08+00:00"
+}

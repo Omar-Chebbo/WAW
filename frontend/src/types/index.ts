@@ -245,6 +245,32 @@ export interface ExtremeEdgeRow {
   score_samples: number | null
 }
 
+export interface RegionConfig {
+  high_pct: number
+  low_pct: number
+  middle_pct: number
+}
+
+export interface Scatter3DPoint {
+  source: string
+  target: string
+  edge_key: string
+  x: number    // PA anomaly score (IF score_samples)
+  y: number    // LP anomaly score (IF score_samples)
+  z: number    // PA+LP anomaly score (IF score_samples)
+  is_backbone: boolean
+  pa_rank: number
+  lp_rank: number
+  pa_lp_rank: number
+}
+
+export interface Scatter3DData {
+  points: Scatter3DPoint[]
+  backbone_count: number
+  non_backbone_count: number
+  backbone_contamination: number
+}
+
 export interface ExtremeSelectionBalance {
   top_10_pct: number
   bottom_10_pct: number
@@ -253,6 +279,7 @@ export interface ExtremeSelectionBalance {
   bottom_10_count?: number
   middle_80_count?: number
   selected_total?: number
+  region_config?: RegionConfig
 }
 
 export interface MultiFeatureScoreBalance extends ExtremeSelectionBalance {
@@ -318,6 +345,11 @@ export interface MultiFeatureQuadrantCount {
 }
 
 export interface MultiFeatureOverlapSummary {
+  multifeature_novelty: {
+    value: number | null
+    novel_edges: number
+    multi_edges: number
+  }
   edges: {
     common_to_all: { count: number; sample: string[] }
     unique: Record<string, { count: number; sample: string[] }>
@@ -351,6 +383,8 @@ export interface MultiFeatureExperimentResponse {
     points: MultiFeatureScatterPoint[]
     quadrant_counts: MultiFeatureQuadrantCount[]
   }
+  scatter_3d: Scatter3DData
+  region_config: RegionConfig
   overlap: MultiFeatureOverlapSummary
   interpretation: string
 }
@@ -471,6 +505,20 @@ export interface ScoreCacheStatusResponse {
   methods: Record<string, ScoreCacheMethodStatus>
 }
 
+export interface ContaminationNovelty {
+  novelty_fraction: number | null
+  novel_edges: number
+  pa_lp_edges: number
+  pa_edges: number
+  lp_edges: number
+  single_feature_union_edges: number
+  overlap_pa: number
+  overlap_lp: number
+  jaccard_pa: number
+  jaccard_lp: number
+  novel_edge_keys: string[]
+}
+
 export interface ContaminationRunResult {
   contamination_label: string
   contamination_value: number | null
@@ -485,6 +533,10 @@ export interface ContaminationRunResult {
   reachability: number
   connected_components: number
   selected_edge_keys: string[]
+  /** Same nine evaluation metrics, value and relative deviation, as Wizard Step 7. */
+  metrics?: Record<string, MetricResult>
+  /** Defined for PA+LP runs: unique joint edges against same-fraction PA and LP baselines. */
+  novelty?: ContaminationNovelty
   summary: AnomalySummary
   inspector: AnomalyInspector
   rows: Record<string, any>[]

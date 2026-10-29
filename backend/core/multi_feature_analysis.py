@@ -278,8 +278,10 @@ def _run_multifeature_case(
 
 
 
-def _extreme_rows(table_df: pd.DataFrame, primary_score_column: str) -> dict:
+def _extreme_rows(table_df: pd.DataFrame, primary_score_column: str, high_region_pct: float = 0.10, low_region_pct: float = 0.10) -> dict:
     primary_anomaly_col = f"{primary_score_column}_anomaly"
+
+    region_config = {"high_pct": high_region_pct, "low_pct": low_region_pct, "middle_pct": round(1 - high_region_pct - low_region_pct, 4)}
 
     ordered = table_df.sort_values(primary_score_column, ascending=True).copy()
     total = len(ordered)
@@ -287,7 +289,7 @@ def _extreme_rows(table_df: pd.DataFrame, primary_score_column: str) -> dict:
         return {
             "lowest": [],
             "highest": [],
-            "selection_balance": {"top_10_pct": 0.0, "bottom_10_pct": 0.0, "middle_80_pct": 0.0},
+            "selection_balance": {"top_10_pct": 0.0, "bottom_10_pct": 0.0, "middle_80_pct": 0.0, "region_config": region_config},
         }
 
     def _safe_int(value) -> int | None:
@@ -325,8 +327,8 @@ def _extreme_rows(table_df: pd.DataFrame, primary_score_column: str) -> dict:
     highest = _rows(ordered.sort_values(primary_score_column, ascending=False))
 
     anomaly_mask = ordered[primary_anomaly_col] == -1
-    bottom_cut = max(1, int(np.ceil(total * 0.10)))
-    top_cut = max(1, int(np.ceil(total * 0.10)))
+    bottom_cut = max(1, int(np.ceil(total * low_region_pct)))
+    top_cut = max(1, int(np.ceil(total * high_region_pct)))
     bottom_idx = ordered.index[:bottom_cut]
     top_idx = ordered.index[-top_cut:]
     middle_idx = ordered.index[bottom_cut:-top_cut] if total > (bottom_cut + top_cut) else ordered.index[0:0]
@@ -346,6 +348,7 @@ def _extreme_rows(table_df: pd.DataFrame, primary_score_column: str) -> dict:
             "bottom_10_count": 0,
             "middle_80_count": 0,
             "selected_total": 0,
+            "region_config": region_config,
         }
     else:
         balance = {
@@ -356,6 +359,7 @@ def _extreme_rows(table_df: pd.DataFrame, primary_score_column: str) -> dict:
             "bottom_10_count": bottom_count,
             "middle_80_count": middle_count,
             "selected_total": flagged_total,
+            "region_config": region_config,
         }
 
     return {
@@ -367,11 +371,11 @@ def _extreme_rows(table_df: pd.DataFrame, primary_score_column: str) -> dict:
 
 
 
-def _region_masks(df: pd.DataFrame, column: str) -> dict[str, pd.Series]:
-    """Split a score column into bottom 10%, middle 80%, and top 10% regions.
+def _region_masks(df: pd.DataFrame, column: str, high_region_pct: float = 0.10, low_region_pct: float = 0.10) -> dict[str, pd.Series]:
+    """Split a score column into bottom, middle, and top regions by customisable percentages.
 
     The split is rank-based rather than threshold-only, so ties at zero do not
-    accidentally make the bottom region much larger than 10%.
+    accidentally make the bottom region much larger than expected.
     """
     total = len(df)
     if total == 0:
@@ -379,9 +383,10 @@ def _region_masks(df: pd.DataFrame, column: str) -> dict[str, pd.Series]:
         return {"low": empty, "middle": empty, "high": empty}
 
     ordered = df.sort_values(column, ascending=True)
-    cut = max(1, int(np.ceil(total * 0.10)))
-    low_idx = ordered.index[:cut]
-    high_idx = ordered.index[-cut:]
+    low_cut = max(1, int(np.ceil(total * low_region_pct)))
+    high_cut = max(1, int(np.ceil(total * high_region_pct)))
+    low_idx = ordered.index[:low_cut]
+    high_idx = ordered.index[-high_cut:]
 
     low = df.index.isin(low_idx)
     high = df.index.isin(high_idx)
@@ -394,8 +399,9 @@ def _region_masks(df: pd.DataFrame, column: str) -> dict[str, pd.Series]:
     }
 
 
-def _score_balance_for_multifeature(df: pd.DataFrame, column: str, selected_mask: pd.Series) -> dict:
-    masks = _region_masks(df, column)
+def _score_balance_for_multifeature(df: pd.DataFrame, column: str, selected_mask: pd.Series, high_region_pct: float = 0.10, low_region_pct: float = 0.10) -> dict:
+    region_config = {"high_pct": high_region_pct, "low_pct": low_region_pct, "middle_pct": round(1 - high_region_pct - low_region_pct, 4)}
+    masks = _region_masks(df, column, high_region_pct=high_region_pct, low_region_pct=low_region_pct)
     selected_total = int(selected_mask.sum())
 
     def count(region: str) -> int:
@@ -416,17 +422,18 @@ def _score_balance_for_multifeature(df: pd.DataFrame, column: str, selected_mask
         "bottom_10_count": low_count,
         "middle_80_count": middle_count,
         "selected_total": selected_total,
+        "region_config": region_config,
     }
 
 
-def _multi_feature_profile(df: pd.DataFrame) -> dict:
+def _multi_feature_profile(df: pd.DataFrame, high_region_pct: float = 0.10, low_region_pct: float = 0.10) -> dict:
     """Describe what score regions the PA+LP backbone selected from."""
     anomaly_col = f"{MULTI_METHOD_ID}_anomaly"
     selected_mask = df[anomaly_col] == -1
     selected_total = int(selected_mask.sum())
 
-    pa_regions = _region_masks(df, PA_COLUMN)
-    lp_regions = _region_masks(df, LP_COLUMN)
+    pa_regions = _region_masks(df, PA_COLUMN, high_region_pct=high_region_pct, low_region_pct=low_region_pct)
+    lp_regions = _region_masks(df, LP_COLUMN, high_region_pct=high_region_pct, low_region_pct=low_region_pct)
     order = ["low", "middle", "high"]
 
     joint_grid = []
@@ -446,8 +453,8 @@ def _multi_feature_profile(df: pd.DataFrame) -> dict:
 
     return {
         "selected_total": selected_total,
-        "pa_score_balance": _score_balance_for_multifeature(df, PA_COLUMN, selected_mask),
-        "lp_score_balance": _score_balance_for_multifeature(df, LP_COLUMN, selected_mask),
+        "pa_score_balance": _score_balance_for_multifeature(df, PA_COLUMN, selected_mask, high_region_pct=high_region_pct, low_region_pct=low_region_pct),
+        "lp_score_balance": _score_balance_for_multifeature(df, LP_COLUMN, selected_mask, high_region_pct=high_region_pct, low_region_pct=low_region_pct),
         "joint_grid": joint_grid,
     }
 
@@ -469,6 +476,28 @@ def _node_jaccard(left: Iterable[str], right: Iterable[str]) -> float:
         return 1.0
     return round(len(left_set & right_set) / len(union), 6)
 
+
+
+def compute_multifeature_novelty(
+    pa_edge_keys: Iterable[str],
+    lp_edge_keys: Iterable[str],
+    multi_edge_keys: Iterable[str],
+) -> dict:
+    """The single source of truth for the Multi-Feature Study novelty N_rho.
+
+    N_rho = cardinality of (joint edges excluding PA-or-LP edges) / joint edge count.
+    The novelty is undefined if the joint backbone has no selected edges.
+    """
+    pa = set(pa_edge_keys)
+    lp = set(lp_edge_keys)
+    joint = set(multi_edge_keys)
+    unique = joint - (pa | lp)
+    return {
+        "value": len(unique) / len(joint) if joint else None,
+        "novel_edges": len(unique),
+        "multi_edges": len(joint),
+        "novel_edge_keys": sorted(unique),
+    }
 
 
 def _common_unique_summary(pa_run: FeatureRun, lp_run: FeatureRun, multi_run: FeatureRun) -> dict:
@@ -495,7 +524,13 @@ def _common_unique_summary(pa_run: FeatureRun, lp_run: FeatureRun, multi_run: Fe
         for key, value in node_sets.items()
     }
 
+    # Reuse the same definition as the Contamination Lab at every retention.
+    novelty = compute_multifeature_novelty(
+        edge_sets["pa"], edge_sets["lp"], edge_sets[MULTI_METHOD_ID]
+    )
+
     return {
+        "multifeature_novelty": {key: novelty[key] for key in ("value", "novel_edges", "multi_edges")},
         "edges": {
             "common_to_all": {"count": len(common_edges), "sample": common_edges[:15]},
             "unique": {key: {"count": len(value), "sample": value[:15]} for key, value in unique_edges.items()},
@@ -536,6 +571,57 @@ def _quadrant_counts(df: pd.DataFrame, anomaly_col: str) -> list[dict]:
         result.append({"quadrant": label, "total": total, "selected": selected})
     return result
 
+
+
+def _scatter_3d_points(merged_df: pd.DataFrame, backbone_contamination: float = 0.20) -> dict:
+    """Build 3D scatter data: PA anomaly score (x), LP anomaly score (y), PA+LP anomaly score (z).
+
+    The backbone membership is determined by the PA+LP method at the given contamination.
+    We use the existing rank-based selection: rank <= top_count means backbone.
+    """
+    total = len(merged_df)
+    if total == 0:
+        return {"points": [], "backbone_count": 0, "non_backbone_count": 0, "backbone_contamination": backbone_contamination}
+
+    pa_col = f"{PA_COLUMN}_if_score_samples"
+    lp_col = f"{LP_COLUMN}_if_score_samples"
+    multi_col = f"{MULTI_METHOD_ID}_if_score_samples"
+    multi_rank_col = f"{MULTI_METHOD_ID}_if_rank"
+
+    # Determine backbone membership at the given contamination
+    selection_fraction = normalize_selection_fraction(backbone_contamination)
+    selected_count = top_count_from_fraction(total, selection_fraction)
+
+    points = []
+    backbone_count = 0
+    non_backbone_count = 0
+
+    for _, row in merged_df.iterrows():
+        is_backbone = int(row.get(multi_rank_col, total + 1)) <= selected_count
+        if is_backbone:
+            backbone_count += 1
+        else:
+            non_backbone_count += 1
+
+        points.append({
+            "source": str(row["source"]),
+            "target": str(row["target"]),
+            "edge_key": stable_edge_key(row["source"], row["target"]),
+            "x": round(float(row.get(pa_col, 0)), 6),  # PA anomaly score
+            "y": round(float(row.get(lp_col, 0)), 6),  # LP anomaly score
+            "z": round(float(row.get(multi_col, 0)), 6),  # PA+LP anomaly score
+            "is_backbone": is_backbone,
+            "pa_rank": int(row.get(f"{PA_COLUMN}_if_rank", 0)),
+            "lp_rank": int(row.get(f"{LP_COLUMN}_if_rank", 0)),
+            "pa_lp_rank": int(row.get(f"{MULTI_METHOD_ID}_if_rank", 0)),
+        })
+
+    return {
+        "points": points,
+        "backbone_count": backbone_count,
+        "non_backbone_count": non_backbone_count,
+        "backbone_contamination": backbone_contamination,
+    }
 
 
 def _scatter_points(merged_df: pd.DataFrame) -> list[dict]:
@@ -599,7 +685,14 @@ def run_multi_feature_experiment(
     scored_df: pd.DataFrame,
     contamination: float | str = "auto",
     scaling_mode: str = "none",
+    high_region_pct: float = 0.10,
+    low_region_pct: float = 0.10,
 ) -> dict:
+    if high_region_pct + low_region_pct >= 1.0:
+        raise ValueError("high_region_pct + low_region_pct must be less than 1.0")
+    high_region_pct = max(0.0, min(0.49, high_region_pct))
+    low_region_pct = max(0.0, min(0.49, low_region_pct))
+
     pa_run, pa_labeled = _run_single_feature_case(original_graph, scored_df, "pa", contamination)
     lp_run, lp_labeled = _run_single_feature_case(original_graph, scored_df, "lp", contamination)
     multi_run, multi_labeled = _run_multifeature_case(original_graph, scored_df, contamination, scaling_mode)
@@ -643,7 +736,7 @@ def run_multi_feature_experiment(
                 "summary": pa_run.summary,
                 "selected_edge_keys": pa_run.selected_edge_keys,
                 "selected_node_ids": pa_run.selected_node_ids,
-                "extremes": _extreme_rows(merged, PA_COLUMN),
+                "extremes": _extreme_rows(merged, PA_COLUMN, high_region_pct=high_region_pct, low_region_pct=low_region_pct),
             },
             "lp": {
                 "method_id": lp_run.method_id,
@@ -652,7 +745,7 @@ def run_multi_feature_experiment(
                 "summary": lp_run.summary,
                 "selected_edge_keys": lp_run.selected_edge_keys,
                 "selected_node_ids": lp_run.selected_node_ids,
-                "extremes": _extreme_rows(merged, LP_COLUMN),
+                "extremes": _extreme_rows(merged, LP_COLUMN, high_region_pct=high_region_pct, low_region_pct=low_region_pct),
             },
             MULTI_METHOD_ID: {
                 "method_id": multi_run.method_id,
@@ -663,11 +756,13 @@ def run_multi_feature_experiment(
                 "selected_node_ids": multi_run.selected_node_ids,
             },
         },
-        "multi_feature_profile": _multi_feature_profile(merged),
+        "multi_feature_profile": _multi_feature_profile(merged, high_region_pct=high_region_pct, low_region_pct=low_region_pct),
         "scatter": {
             "points": _scatter_points(merged),
             "quadrant_counts": _quadrant_counts(merged, f"{MULTI_METHOD_ID}_anomaly"),
         },
+        "scatter_3d": _scatter_3d_points(merged, backbone_contamination=0.20),
+        "region_config": {"high_pct": high_region_pct, "low_pct": low_region_pct, "middle_pct": round(1 - high_region_pct - low_region_pct, 4)},
         "overlap": overlap,
         "interpretation": _interpretation(pa_run, lp_run, multi_run, overlap),
     }

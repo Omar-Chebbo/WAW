@@ -188,6 +188,36 @@ export const runContaminationExperiment = (params: {
   }).then(r => r.data)
 
 
+/** Download fully numeric, filterable Excel workbooks without refitting any models. */
+export async function downloadContaminationExcel(params: {
+  title: string
+  datasetLabel: string
+  methodLabel: string
+  preprocessing: string
+  filename: string
+  columns: Array<{ key: string; label: string; format?: 'decimal' | 'integer' | 'percent' }>
+  rows: Array<Record<string, string | number | null>>
+}): Promise<void> {
+  const response = await api.post('/research/contamination/export/xlsx', {
+    title: params.title,
+    dataset_label: params.datasetLabel,
+    method_label: params.methodLabel,
+    preprocessing_used: params.preprocessing,
+    filename: params.filename,
+    columns: params.columns,
+    rows: params.rows,
+  }, { responseType: 'blob' })
+  const blobUrl = URL.createObjectURL(response.data as Blob)
+  const anchor = document.createElement('a')
+  anchor.href = blobUrl
+  anchor.download = `${params.filename}.xlsx`
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
+}
+
+
 export const runMultiFeatureExperiment = (params: {
   datasetId: string
   contamination?: number
@@ -195,6 +225,8 @@ export const runMultiFeatureExperiment = (params: {
   sessionId?: string | null
   isCustom?: boolean
   scalingMode?: MultiFeatureScalingMode
+  highRegionPct?: number
+  lowRegionPct?: number
 }) =>
   api.post<MultiFeatureExperimentResponse>('/research/multi-feature', {
     dataset_id: params.datasetId,
@@ -203,6 +235,8 @@ export const runMultiFeatureExperiment = (params: {
     session_id: params.sessionId ?? null,
     is_custom: params.isCustom ?? false,
     scaling_mode: params.scalingMode ?? 'none',
+    high_region_pct: params.highRegionPct ?? 10,
+    low_region_pct: params.lowRegionPct ?? 10,
   }).then(r => r.data)
 
 // ── Research analysis ─────────────────────────────────────────────

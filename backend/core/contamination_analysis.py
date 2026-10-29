@@ -16,6 +16,7 @@ import networkx as nx
 import pandas as pd
 
 from backend.core.anomaly import (
+    top_count_from_fraction,
     anomaly_summary,
     label_anomalies,
     extract_result_dataframe,
@@ -27,9 +28,13 @@ from backend.core.evaluation import (
     node_fraction,
     number_components,
     reachability,
+    METRIC_REGISTRY,
+    run_all_metrics,
 )
 from backend.core.methods import METHOD_REGISTRY
-from backend.core.multi_feature_analysis import label_multifeature_edges
+from backend.core.multi_feature_analysis import (
+    label_multifeature_edges, PA_COLUMN, LP_COLUMN, compute_multifeature_novelty,
+)
 from backend.services.anomaly_service import (
     build_anomaly_inspector_from_df,
     build_labeled_rows_from_df,
@@ -119,6 +124,8 @@ def _run_single_contamination(
     node_fraction_value, _ = node_fraction(original_graph, backbone_graph)
     reachability_value, _ = reachability(original_graph, backbone_graph)
     component_value, _ = number_components(original_graph, backbone_graph)
+    # Exactly the same metric registry and deviation definitions as Wizard Step 7.
+    wizard_metrics = run_all_metrics(original_graph, backbone_graph, list(METRIC_REGISTRY))
 
     summary = anomaly_summary(labeled, score_column)
     inspector = build_anomaly_inspector_from_df(labeled, method_id)
@@ -138,6 +145,7 @@ def _run_single_contamination(
         "node_fraction": round(float(node_fraction_value), 6),
         "reachability": round(float(reachability_value), 6),
         "connected_components": int(component_value),
+        "metrics": wizard_metrics,
         "selected_edge_keys": selected_edge_keys,
         "summary": summary,
         "inspector": inspector,
@@ -178,6 +186,27 @@ def run_contamination_experiment(
         )
         ranked_df = extract_result_dataframe(base_result)
 
+    # Novelty is defined only for the joint PA+LP representation. The reference
+    # PA and LP models are independently fitted ONCE to the same observed edges.
+    # IMPORTANT: the Multi-Feature Study always uses *raw* PA-only and LP-only
+    # reference scores, even if a transformation is chosen for joint PA+LP.
+    # Keep that convention here to match the Multi-Feature Study exactly.
+    baseline_rankings: dict[str, list[str]] = {}
+    if method_id == "pa_lp":
+        for baseline_id, baseline_column in (("pa", PA_COLUMN), ("lp", LP_COLUMN)):
+            labeled_baseline = extract_result_dataframe(label_anomalies(
+                scored_df.copy(), baseline_column,
+                transform_id="raw",
+                contamination=normalize_selection_fraction(None),
+            ))
+            sorted_baseline = labeled_baseline.sort_values(
+                f"{baseline_column}_if_rank", kind="stable"
+            )
+            baseline_rankings[baseline_id] = [
+                stable_edge_key(row.source, row.target)
+                for row in sorted_baseline.itertuples(index=False)
+            ]
+
     runs = [
         _run_single_contamination(
             original_graph=original_graph,
@@ -189,6 +218,28 @@ def run_contamination_experiment(
         )
         for spec in specs
     ]
+
+    if method_id == "pa_lp":
+        for run in runs:
+            fraction = float(run["contamination_value"])
+            pa_selection = set(baseline_rankings["pa"][:top_count_from_fraction(len(baseline_rankings["pa"]), fraction)])
+            lp_selection = set(baseline_rankings["lp"][:top_count_from_fraction(len(baseline_rankings["lp"]), fraction)])
+            joint_selection = set(run["selected_edge_keys"])
+            reference_union = pa_selection | lp_selection
+            novelty = compute_multifeature_novelty(pa_selection, lp_selection, joint_selection)
+            run["novelty"] = {
+                "novelty_fraction": novelty["value"],
+                "novel_edges": novelty["novel_edges"],
+                "pa_lp_edges": len(joint_selection),
+                "pa_edges": len(pa_selection),
+                "lp_edges": len(lp_selection),
+                "single_feature_union_edges": len(reference_union),
+                "overlap_pa": len(joint_selection & pa_selection),
+                "overlap_lp": len(joint_selection & lp_selection),
+                "jaccard_pa": len(joint_selection & pa_selection) / len(joint_selection | pa_selection) if (joint_selection | pa_selection) else 1.0,
+                "jaccard_lp": len(joint_selection & lp_selection) / len(joint_selection | lp_selection) if (joint_selection | lp_selection) else 1.0,
+                "novel_edge_keys": novelty["novel_edge_keys"],
+            }
 
     return {
         "method_id": method_id,
